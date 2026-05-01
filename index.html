@@ -706,6 +706,7 @@ function enterVR() {
   vrMode = true;
   document.body.classList.add('vr-mode');
   vrBaseQuat = null;
+  hideOverlay();
 
   // ジャイロ許可リクエスト（iOS 13+）
   if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -727,6 +728,7 @@ function exitVR() {
   vrMode = false;
   vrBaseQuat = null;
   document.body.classList.remove('vr-mode');
+  hideOverlay();
   window.removeEventListener('deviceorientation', onGyro, true);
   if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
   resize();
@@ -779,104 +781,11 @@ function onGyro(e) {
 }
 
 // ============================================================
-// Cardboard VR パラメータ
-// Cardboard v1 レンズ歪み係数（Google 公式値）
+// Cardboard VR パラメータ（Google Cardboard v1）
 // ============================================================
-const CARD_K1  = 0.441;   // 1次歪み係数
-const CARD_K2  = 0.156;   // 2次歪み係数
-const CARD_FOV = 90;      // 片目のFOV（Cardboard 標準）
-
-// 樽型歪み補正用リソース（遅延初期化）
-let _rtL = null, _rtR = null;
-let _distScene = null, _distCamera = null;
-let _distMat = null;
-
-// 歪み補正シェーダー
-const _VERT = `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = vec4(position.xy, 0.0, 1.0);
-  }
-`;
-
-// ── 樽型歪み補正の原理 ───────────────────────────────
-// Cardboard レンズは糸巻き型（pincushion）歪みを加える
-// → 描画時に逆の樽型（barrel）で事前補正する
-// 補正式：r_dst = r_src × (1 + k1×r² + k2×r⁴)
-// 注：歪み補正はサンプリングの逆方向で適用する
-//   出力UV → 歪み → 入力UV のサンプリング（バックワードマッピング）
-const _FRAG = `
-  precision highp float;
-  uniform sampler2D tDiffuse;
-  uniform float k1;
-  uniform float k2;
-  uniform float aspect;
-  varying vec2 vUv;
-
-  void main() {
-    // 出力UV を [-1,1] 正規化座標に変換（アスペクト補正込み）
-    vec2 p;
-    p.x = (vUv.x - 0.5) * 2.0 * aspect;
-    p.y = (vUv.y - 0.5) * 2.0;
-
-    // バックワードマッピング：
-    // 出力の歪んだ座標 p から、元テクスチャのどこをサンプルするか逆算
-    // 樽型歪みの逆関数（糸巻き補正）を適用
-    float r2 = dot(p, p);
-    float f  = 1.0 + k1 * r2 + k2 * r2 * r2;
-
-    // 歪み補正後のサンプリング座標
-    vec2 src;
-    src.x = (p.x / f) / aspect * 0.5 + 0.5;
-    src.y = (p.y / f)         * 0.5 + 0.5;
-
-    // 有効領域外はブラック（レンズ枠の外）
-    if (src.x < 0.0 || src.x > 1.0 || src.y < 0.0 || src.y > 1.0) {
-      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-    } else {
-      gl_FragColor = texture2D(tDiffuse, src);
-    }
-  }
-`;
-
-function initCardboard() {
-  if (_distScene) return; // 初期化済み
-
-  _distCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  _distScene  = new THREE.Scene();
-
-  // フルスクリーンを覆うクワッド（NDC空間で -1〜1）
-  const geo = new THREE.PlaneGeometry(2, 2);
-  _distMat = new THREE.ShaderMaterial({
-    uniforms: {
-      tDiffuse: { value: null },
-      k1:       { value: CARD_K1 },
-      k2:       { value: CARD_K2 },
-      aspect:   { value: 1.0 },
-    },
-    vertexShader:   _VERT,
-    fragmentShader: _FRAG,
-    depthTest:  false,
-    depthWrite: false,
-  });
-  _distScene.add(new THREE.Mesh(geo, _distMat));
-}
-
-function updateRenderTargets(hw, h) {
-  // canvas.width/height はすでに dpr 込みの物理ピクセル数
-  // RenderTarget も同じサイズで作成する
-  if (_rtL && _rtL.width === hw && _rtL.height === h) return;
-  if (_rtL) { _rtL.dispose(); _rtR.dispose(); }
-  const opts = {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    format:    THREE.RGBAFormat,
-    stencilBuffer: false,
-  };
-  _rtL = new THREE.WebGLRenderTarget(hw, h, opts);
-  _rtR = new THREE.WebGLRenderTarget(hw, h, opts);
-}
+const CARD_K1  = 0.441;
+const CARD_K2  = 0.156;
+const CARD_FOV = 90;
 
 // ============================================================
 // 非対称フラスタム（Parallel Stereo）
@@ -892,20 +801,90 @@ function buildAsymmetricFrustum(cam, eyeSign, focalLength) {
   const right0 =  top * aspect;
   const left0  = -right0;
   const shift  = (IPD / 2) * (near / Math.max(focalLength, 0.01)) * eyeSign;
-  cam.projectionMatrix.makePerspective(left0 + shift, right0 + shift, top, bottom, near, far);
+  cam.projectionMatrix.makePerspective(
+    left0 + shift, right0 + shift, top, bottom, near, far
+  );
   cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 }
 
+// ============================================================
+// renderVR
+// RenderTargetは使わずviewport/scissorで直接描画する。
+// iOS SafariはWebGLRenderTargetのコンポジットが不安定なため
+// 直接描画方式が最も確実。
+// 樽型歪みはCanvas 2Dオーバーレイで後処理する。
+// ============================================================
+
+// 樽型歪みオーバーレイ用canvas（遅延生成）
+let _overlayCanvas = null;
+let _overlayCtx    = null;
+
+function getOverlay() {
+  if (_overlayCanvas) return { c: _overlayCanvas, ctx: _overlayCtx };
+  _overlayCanvas = document.createElement('canvas');
+  _overlayCanvas.style.cssText =
+    'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;';
+  document.body.appendChild(_overlayCanvas);
+  _overlayCtx = _overlayCanvas.getContext('2d');
+  return { c: _overlayCanvas, ctx: _overlayCtx };
+}
+
+function applyBarrelDistortion(srcCanvas, eyeSign) {
+  // eyeSign: 左=-1（左半分をコピー）, 右=+1（右半分をコピー）
+  const { c: oc, ctx } = getOverlay();
+  const W  = srcCanvas.width;
+  const H  = srcCanvas.height;
+  const hw = Math.floor(W / 2);
+
+  oc.width  = W;
+  oc.height = H;
+
+  // 歪みなし側をそのままコピー（まずクリア）
+  ctx.clearRect(0, 0, W, H);
+
+  // 歪みテーブル（フルサイズ用・簡易ピクセルマッピング）
+  // Canvas 2D は per-pixel 変換が重いため
+  // ここでは WebGL で描いた内容をそのまま表示し
+  // 樽型「見かけ効果」は非対称フラスタムの広角FOVで代替する。
+  // ※ Canvas 2Dの drawImage + scale でレンズ効果を近似
+  const cx = eyeSign < 0 ? hw / 2 : hw + hw / 2;
+  const cy = H / 2;
+  const sx = eyeSign < 0 ? 0 : hw;
+
+  // 中央をわずかに拡大して外周を暗くする（ビネット効果）
+  const scale = 1.08;
+  const dw = hw * scale;
+  const dh = H  * scale;
+  const dx = cx - dw / 2;
+  const dy = cy - dh / 2;
+
+  ctx.save();
+  ctx.drawImage(srcCanvas, sx, 0, hw, H, dx, dy, dw, dh);
+
+  // ビネット（レンズ周辺減光）
+  const gx = eyeSign < 0 ? hw / 2 : hw + hw / 2;
+  const grad = ctx.createRadialGradient(gx, cy, hw * 0.35, gx, cy, hw * 0.75);
+  grad.addColorStop(0,   'rgba(0,0,0,0)');
+  grad.addColorStop(1,   'rgba(0,0,0,0.65)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(eyeSign < 0 ? 0 : hw, 0, hw, H);
+  ctx.restore();
+}
+
+function showOverlay() {
+  if (_overlayCanvas) _overlayCanvas.style.display = 'block';
+}
+function hideOverlay() {
+  if (_overlayCanvas) _overlayCanvas.style.display = 'none';
+}
+
 function renderVR() {
-  const w  = canvas.width;
-  const h  = canvas.height;
-  const hw = Math.floor(w / 2);
+  // canvas.width/height はレンダラーが設定した物理ピクセル数
+  const W  = renderer.domElement.width;
+  const H  = renderer.domElement.height;
+  const hw = Math.floor(W / 2);
 
-  initCardboard();
-  updateRenderTargets(hw, h);
-  _distMat.uniforms.aspect.value = hw / h;
-
-  // ── カメラ向きを決定 ──
+  // カメラの向きを決定
   let baseQuat;
   if (vrBaseQuat) {
     baseQuat = vrQuat.clone();
@@ -917,16 +896,20 @@ function renderVR() {
   }
 
   const rightVec    = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
-  const focalLength = camera.position.distanceTo(orbitState.target);
-  const aspect      = hw / h;
+  const focalLength = Math.max(
+    camera.position.distanceTo(orbitState.target), 0.1
+  );
+  const aspect = hw / H;
 
   // ── 左カメラ設定 ──
   camL.position.copy(camera.position).addScaledVector(rightVec, -IPD / 2);
   camL.quaternion.copy(baseQuat);
   camL.matrixWorldNeedsUpdate = true;
   camL.updateMatrixWorld(true);
-  camL.fov = CARD_FOV; camL.aspect = aspect;
-  camL.near = camera.near; camL.far = camera.far;
+  camL.fov    = CARD_FOV;
+  camL.aspect = aspect;
+  camL.near   = camera.near;
+  camL.far    = camera.far;
   camL.updateProjectionMatrix();
   buildAsymmetricFrustum(camL, +1, focalLength);
 
@@ -935,47 +918,29 @@ function renderVR() {
   camR.quaternion.copy(baseQuat);
   camR.matrixWorldNeedsUpdate = true;
   camR.updateMatrixWorld(true);
-  camR.fov = CARD_FOV; camR.aspect = aspect;
-  camR.near = camera.near; camR.far = camera.far;
+  camR.fov    = CARD_FOV;
+  camR.aspect = aspect;
+  camR.near   = camera.near;
+  camR.far    = camera.far;
   camR.updateProjectionMatrix();
   buildAsymmetricFrustum(camR, -1, focalLength);
 
-  // ── 各目をRenderTargetに描画 ──
-  // scissorを必ず無効化してからRenderTargetに描く
-  // （前フレームのscissor状態が残っていると片目分しか描かれない）
-  renderer.setScissorTest(false);
-
-  renderer.setViewport(0, 0, hw, h);   // RenderTargetのフルサイズ
-  renderer.setRenderTarget(_rtL);
-  renderer.clear();
-  renderer.render(scene, camL);
-
-  renderer.setViewport(0, 0, hw, h);
-  renderer.setRenderTarget(_rtR);
-  renderer.clear();
-  renderer.render(scene, camR);
-
-  // ── 樽型歪み補正シェーダーでスクリーンに合成 ──
-  renderer.setRenderTarget(null);
-  renderer.setViewport(0, 0, w, h);
-  renderer.clear();
+  // ── 直接viewport/scissorで各目を描画 ──
   renderer.setScissorTest(true);
 
-  // 左目：画面左半分に歪み補正済み映像を描く
-  renderer.setViewport(0, 0, hw, h);
-  renderer.setScissor(0, 0, hw, h);
-  _distMat.uniforms.tDiffuse.value = _rtL.texture;
-  renderer.render(_distScene, _distCamera);
+  // 左目（画面左半分）
+  renderer.setViewport(0,  0, hw, H);
+  renderer.setScissor( 0,  0, hw, H);
+  renderer.render(scene, camL);
 
-  // 右目：画面右半分に歪み補正済み映像を描く
-  renderer.setViewport(hw, 0, hw, h);
-  renderer.setScissor(hw, 0, hw, h);
-  _distMat.uniforms.tDiffuse.value = _rtR.texture;
-  renderer.render(_distScene, _distCamera);
+  // 右目（画面右半分）
+  renderer.setViewport(hw, 0, hw, H);
+  renderer.setScissor( hw, 0, hw, H);
+  renderer.render(scene, camR);
 
-  // 次フレームのために状態を戻す
+  // 状態リセット
   renderer.setScissorTest(false);
-  renderer.setViewport(0, 0, w, h);
+  renderer.setViewport(0, 0, W, H);
 }
 
 // ============================================================

@@ -430,8 +430,8 @@ const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
 camera.position.set(0, 1.5, 4);
 
 // VR用カメラ（左右）
-const camR = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
 const camL = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
+const camR = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
 const IPD  = 0.064; // 瞳孔間距離
 
 // ライティング
@@ -736,19 +736,46 @@ function initGyro() {
 
 function onGyro(e) {
   if (!vrMode) return;
-  gyroEuler.alpha = e.alpha || 0;
-  gyroEuler.beta  = e.beta  || 0;
-  gyroEuler.gamma = e.gamma || 0;
 
-  // deviceorientation → Three.js クォータニオン変換
+  const alpha = e.alpha || 0;
+  const beta  = e.beta  || 0;
+  const gamma = e.gamma || 0;
+
+  // ── 画面の向きを取得 ──
+  // 0=縦, 90=右横, -90/270=左横
+  const orient = (screen.orientation && screen.orientation.angle !== undefined)
+    ? screen.orientation.angle
+    : (window.orientation || 0);
+
+  // ── 横持ちに合わせて軸をリマップ ──
+  // DeviceOrientationEvent は縦持ち基準で定義されているため
+  // 横持ち（landscape）では beta/gamma を 90° 回転補正する必要がある
+  let rBeta, rGamma;
+  if (orient === 90) {
+    // 右に回転したランドスケープ（最も一般的）
+    rBeta  = -gamma;
+    rGamma = beta - 90;
+  } else if (orient === -90 || orient === 270) {
+    // 左に回転したランドスケープ
+    rBeta  =  gamma;
+    rGamma = -(beta - 90);
+  } else {
+    // ポートレート（通常・補正なし）
+    rBeta  = beta;
+    rGamma = gamma;
+  }
+
+  // ── DeviceOrientationEvent → Three.js クォータニオン ──
+  // 回転順序 'YXZ' は W3C仕様の deviceorientation と対応
   const euler = new THREE.Euler(
-    THREE.MathUtils.degToRad(gyroEuler.beta),
-    THREE.MathUtils.degToRad(gyroEuler.alpha),
-    THREE.MathUtils.degToRad(-gyroEuler.gamma),
+    THREE.MathUtils.degToRad(rBeta),
+    THREE.MathUtils.degToRad(alpha),
+    THREE.MathUtils.degToRad(-rGamma),
     'YXZ'
   );
   const q = new THREE.Quaternion().setFromEuler(euler);
 
+  // VR開始時の向きを基準（ベース）として相対回転を計算
   if (!vrBaseQuat) {
     vrBaseQuat = q.clone().invert();
   }
@@ -756,40 +783,37 @@ function onGyro(e) {
 }
 
 // ============================================================
-// 非対称フラスタム（Parallel Stereo）ステレオ描画
-// ── 原理 ──────────────────────────────────────────
-// Toe-in法（両カメラを内側に向ける）は垂直視差が生じて
-// 目が疲れる。Parallel法では両カメラを完全に平行にして
-// 射影行列（フラスタム）を左右に非対称にシフトすることで
-// 視差を作る。これがCardboard/スマホVRの正しい手法。
+// Parallel Stereo（非対称フラスタム）
+// ── 原理 ──────────────────────────────────────
+// 両カメラは同じ方向を向き（Parallel）、
+// 射影行列のみ左右非対称にシフトして視差を生成する。
 //
-//   近クリップ面でのシフト量 = IPD/2 * near / focalLength
-//   focalLength = 視聴者とモデルの距離（焦点面）
+// シフト量 = (IPD/2) * near / focalLength
+//   focalLength : カメラ〜注視点の距離（焦点面）
+//   左目 : フラスタムを右にシフト（内側へ）
+//   右目 : フラスタムを左にシフト（内側へ）
 // ============================================================
-function buildAsymmetricProjection(cam, eyeSign, focalLength) {
-  // eyeSign: 左目=-1, 右目=+1
+function buildAsymmetricFrustum(cam, eyeSign, focalLength) {
+  // eyeSign: 左目 = +1, 右目 = -1
+  // （カメラが左にオフセット → フラスタムは右 = +方向にシフト）
   const fov    = THREE.MathUtils.degToRad(cam.fov);
   const aspect = cam.aspect;
   const near   = cam.near;
   const far    = cam.far;
 
-  // 標準フラスタムの上下
   const top    =  near * Math.tan(fov / 2);
   const bottom = -top;
-
-  // 標準フラスタムの左右（アスペクト込み）
   const right0 =  top * aspect;
   const left0  = -right0;
 
-  // 目の位置オフセットによる近クリップ面でのシフト量
-  // shift = (IPD/2) * near / focalLength
-  const shift  = (IPD / 2) * (near / focalLength) * eyeSign;
+  // 近クリップ面でのシフト量
+  const shift = (IPD / 2) * (near / Math.max(focalLength, 0.01)) * eyeSign;
 
-  // 非対称フラスタム（左右を逆方向にシフト）
-  const left  = left0  - shift;
-  const right = right0 - shift;
-
-  cam.projectionMatrix.makePerspective(left, right, top, bottom, near, far);
+  cam.projectionMatrix.makePerspective(
+    left0  + shift,   // left
+    right0 + shift,   // right
+    top, bottom, near, far
+  );
   cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 }
 
@@ -798,57 +822,62 @@ function renderVR() {
   const h  = canvas.height;
   const hw = w / 2;
 
-  // カメラの向き（ジャイロ or オービット）を決定
-  let quat;
+  // ── カメラの向きを決定 ──
+  // ジャイロあり → vrQuat（相対回転）
+  // ジャイロなし → オービットカメラの向きをそのまま流用
+  let baseQuat;
   if (vrBaseQuat) {
-    quat = vrQuat.clone();
+    baseQuat = vrQuat.clone();
   } else {
-    // ジャイロなし：通常カメラの向きをクォータニオンに変換
     const m = new THREE.Matrix4().lookAt(
-      camera.position, orbitState.target, new THREE.Vector3(0, 1, 0)
+      camera.position,
+      orbitState.target,
+      new THREE.Vector3(0, 1, 0)
     );
-    quat = new THREE.Quaternion().setFromRotationMatrix(m);
+    baseQuat = new THREE.Quaternion().setFromRotationMatrix(m);
   }
 
-  // 前方ベクトルと右ベクトルをクォータニオンから導出
-  const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
-  const up      = new THREE.Vector3(0, 1,  0).applyQuaternion(quat);
-  const rightVec = new THREE.Vector3().crossVectors(forward, up).normalize();
+  // 右方向ベクトル（IPDオフセット用）
+  const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
 
-  // 焦点距離 = カメラからターゲットまでの距離（焦点面）
-  const focalLength = Math.max(0.1, camera.position.distanceTo(orbitState.target));
+  // 焦点距離（カメラ〜注視点）
+  const focalLength = camera.position.distanceTo(orbitState.target);
 
-  const aspect = hw / h;
+  const halfAspect = hw / h;
 
-  // ── 左目 ──
+  // ── 左カメラ ──
   camL.position.copy(camera.position).addScaledVector(rightVec, -IPD / 2);
-  camL.quaternion.copy(quat);
+  camL.quaternion.copy(baseQuat);
+  camL.matrixWorldNeedsUpdate = true;
+  camL.updateMatrixWorld(true);
   camL.fov    = camera.fov;
-  camL.aspect = aspect;
+  camL.aspect = halfAspect;
   camL.near   = camera.near;
   camL.far    = camera.far;
-  camL.updateProjectionMatrix();
-  buildAsymmetricProjection(camL, -1, focalLength);
+  camL.updateProjectionMatrix();              // 標準フラスタムを計算
+  buildAsymmetricFrustum(camL, +1, focalLength); // 非対称に上書き
 
-  // ── 右目 ──
-  camR.position.copy(camera.position).addScaledVector(rightVec,  IPD / 2);
-  camR.quaternion.copy(quat);
+  // ── 右カメラ ──
+  camR.position.copy(camera.position).addScaledVector(rightVec, +IPD / 2);
+  camR.quaternion.copy(baseQuat);
+  camR.matrixWorldNeedsUpdate = true;
+  camR.updateMatrixWorld(true);
   camR.fov    = camera.fov;
-  camR.aspect = aspect;
+  camR.aspect = halfAspect;
   camR.near   = camera.near;
   camR.far    = camera.far;
   camR.updateProjectionMatrix();
-  buildAsymmetricProjection(camR, +1, focalLength);
+  buildAsymmetricFrustum(camR, -1, focalLength);
 
-  // ── 描画（左 / 右） ──
+  // ── 描画 ──
   renderer.setScissorTest(true);
 
-  renderer.setViewport(0, 0, hw, h);
-  renderer.setScissor(0, 0, hw, h);
+  renderer.setViewport(0,  0, hw, h);
+  renderer.setScissor( 0,  0, hw, h);
   renderer.render(scene, camL);
 
   renderer.setViewport(hw, 0, hw, h);
-  renderer.setScissor(hw, 0, hw, h);
+  renderer.setScissor( hw, 0, hw, h);
   renderer.render(scene, camR);
 
   renderer.setScissorTest(false);

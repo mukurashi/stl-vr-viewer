@@ -725,7 +725,9 @@ function enterVR() {
 
 function exitVR() {
   vrMode = false;
+  vrBaseQuat = null;
   document.body.classList.remove('vr-mode');
+  window.removeEventListener('deviceorientation', onGyro, true);
   if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
   resize();
 }
@@ -801,10 +803,11 @@ const _VERT = `
 // ── 樽型歪み補正の原理 ───────────────────────────────
 // Cardboard レンズは糸巻き型（pincushion）歪みを加える
 // → 描画時に逆の樽型（barrel）で事前補正する
-// 補正式：r' = r × (1 + k1×r² + k2×r⁴)
-// UV を外側に押し出すことで、レンズ通過後に真っすぐ見える
+// 補正式：r_dst = r_src × (1 + k1×r² + k2×r⁴)
+// 注：歪み補正はサンプリングの逆方向で適用する
+//   出力UV → 歪み → 入力UV のサンプリング（バックワードマッピング）
 const _FRAG = `
-  precision mediump float;
+  precision highp float;
   uniform sampler2D tDiffuse;
   uniform float k1;
   uniform float k2;
@@ -812,24 +815,27 @@ const _FRAG = `
   varying vec2 vUv;
 
   void main() {
-    // UV を中心基準の [-1, 1] に変換しアスペクト補正
-    vec2 c = (vUv - 0.5) * 2.0;
-    c.x *= aspect;
+    // 出力UV を [-1,1] 正規化座標に変換（アスペクト補正込み）
+    vec2 p;
+    p.x = (vUv.x - 0.5) * 2.0 * aspect;
+    p.y = (vUv.y - 0.5) * 2.0;
 
-    // 樽型歪み：r' = r × (1 + k1r² + k2r⁴)
-    float r2 = dot(c, c);
+    // バックワードマッピング：
+    // 出力の歪んだ座標 p から、元テクスチャのどこをサンプルするか逆算
+    // 樽型歪みの逆関数（糸巻き補正）を適用
+    float r2 = dot(p, p);
     float f  = 1.0 + k1 * r2 + k2 * r2 * r2;
-    c *= f;
 
-    // アスペクト補正を戻し [0, 1] UV に戻す
-    c.x /= aspect;
-    vec2 uv = c * 0.5 + 0.5;
+    // 歪み補正後のサンプリング座標
+    vec2 src;
+    src.x = (p.x / f) / aspect * 0.5 + 0.5;
+    src.y = (p.y / f)         * 0.5 + 0.5;
 
-    // レンズ外はブラック
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+    // 有効領域外はブラック（レンズ枠の外）
+    if (src.x < 0.0 || src.x > 1.0 || src.y < 0.0 || src.y > 1.0) {
       gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
     } else {
-      gl_FragColor = texture2D(tDiffuse, uv);
+      gl_FragColor = texture2D(tDiffuse, src);
     }
   }
 `;
@@ -858,9 +864,16 @@ function initCardboard() {
 }
 
 function updateRenderTargets(hw, h) {
-  if (_rtL && _rtL.width === hw && _rtL.height === h) return; // サイズ変化なし
+  // canvas.width/height はすでに dpr 込みの物理ピクセル数
+  // RenderTarget も同じサイズで作成する
+  if (_rtL && _rtL.width === hw && _rtL.height === h) return;
   if (_rtL) { _rtL.dispose(); _rtR.dispose(); }
-  const opts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+  const opts = {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format:    THREE.RGBAFormat,
+    stencilBuffer: false,
+  };
   _rtL = new THREE.WebGLRenderTarget(hw, h, opts);
   _rtR = new THREE.WebGLRenderTarget(hw, h, opts);
 }
@@ -928,31 +941,39 @@ function renderVR() {
   buildAsymmetricFrustum(camR, -1, focalLength);
 
   // ── 各目をRenderTargetに描画 ──
+  // scissorを必ず無効化してからRenderTargetに描く
+  // （前フレームのscissor状態が残っていると片目分しか描かれない）
+  renderer.setScissorTest(false);
+
+  renderer.setViewport(0, 0, hw, h);   // RenderTargetのフルサイズ
   renderer.setRenderTarget(_rtL);
   renderer.clear();
   renderer.render(scene, camL);
 
+  renderer.setViewport(0, 0, hw, h);
   renderer.setRenderTarget(_rtR);
   renderer.clear();
   renderer.render(scene, camR);
 
-  // ── 樽型歪み補正を適用してスクリーンに合成 ──
+  // ── 樽型歪み補正シェーダーでスクリーンに合成 ──
   renderer.setRenderTarget(null);
+  renderer.setViewport(0, 0, w, h);
   renderer.clear();
   renderer.setScissorTest(true);
 
-  // 左目（画面左半分）
+  // 左目：画面左半分に歪み補正済み映像を描く
   renderer.setViewport(0, 0, hw, h);
   renderer.setScissor(0, 0, hw, h);
   _distMat.uniforms.tDiffuse.value = _rtL.texture;
   renderer.render(_distScene, _distCamera);
 
-  // 右目（画面右半分）
+  // 右目：画面右半分に歪み補正済み映像を描く
   renderer.setViewport(hw, 0, hw, h);
   renderer.setScissor(hw, 0, hw, h);
   _distMat.uniforms.tDiffuse.value = _rtR.texture;
   renderer.render(_distScene, _distCamera);
 
+  // 次フレームのために状態を戻す
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, w, h);
 }

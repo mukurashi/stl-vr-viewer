@@ -737,45 +737,39 @@ function initGyro() {
 function onGyro(e) {
   if (!vrMode) return;
 
-  const alpha = e.alpha || 0;
-  const beta  = e.beta  || 0;
-  const gamma = e.gamma || 0;
+  const DEG = Math.PI / 180;
+  const alpha = (e.alpha || 0) * DEG;
+  const beta  = (e.beta  || 0) * DEG;
+  const gamma = (e.gamma || 0) * DEG;
 
-  // ── 画面の向きを取得 ──
-  // 0=縦, 90=右横, -90/270=左横
-  const orient = (screen.orientation && screen.orientation.angle !== undefined)
+  // 画面の向き（ラジアン）
+  // screen.orientation.angle: 0=縦, 90=右横, 270=左横
+  const orientDeg = (screen.orientation && screen.orientation.angle != null)
     ? screen.orientation.angle
     : (window.orientation || 0);
+  const orient = orientDeg * DEG;
 
-  // ── 横持ちに合わせて軸をリマップ ──
-  // DeviceOrientationEvent は縦持ち基準で定義されているため
-  // 横持ち（landscape）では beta/gamma を 90° 回転補正する必要がある
-  let rBeta, rGamma;
-  if (orient === 90) {
-    // 右に回転したランドスケープ（最も一般的）
-    rBeta  = -gamma;
-    rGamma = beta - 90;
-  } else if (orient === -90 || orient === 270) {
-    // 左に回転したランドスケープ
-    rBeta  =  gamma;
-    rGamma = -(beta - 90);
-  } else {
-    // ポートレート（通常・補正なし）
-    rBeta  = beta;
-    rGamma = gamma;
-  }
-
-  // ── DeviceOrientationEvent → Three.js クォータニオン ──
-  // 回転順序 'YXZ' は W3C仕様の deviceorientation と対応
-  const euler = new THREE.Euler(
-    THREE.MathUtils.degToRad(rBeta),
-    THREE.MathUtils.degToRad(alpha),
-    THREE.MathUtils.degToRad(-rGamma),
-    'YXZ'
-  );
+  // ── Three.js DeviceOrientationControls 準拠の正規実装 ──
+  //
+  // Step1: alpha(Z回転), beta(X回転), gamma(Y回転) → クォータニオン
+  //        回転順序は 'YXZ'（W3C deviceorientation 仕様に対応）
+  const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
   const q = new THREE.Quaternion().setFromEuler(euler);
 
-  // VR開始時の向きを基準（ベース）として相対回転を計算
+  // Step2: デバイス前面をカメラの前方向（-Z）に合わせる補正
+  //        デバイス座標系ではZ上向きがデフォルトなので-X軸で-90°回転
+  const qScreen = new THREE.Quaternion(
+    -Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)  // -90° around X
+  );
+  q.multiply(qScreen);
+
+  // Step3: 画面の回転（縦→横など）をZ軸回転で補正
+  //        これにより landscape / portrait どちらでも正しく動く
+  const qOrient = new THREE.Quaternion();
+  qOrient.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
+  q.multiply(qOrient);
+
+  // VR開始時の向きを基準として相対回転を計算
   if (!vrBaseQuat) {
     vrBaseQuat = q.clone().invert();
   }

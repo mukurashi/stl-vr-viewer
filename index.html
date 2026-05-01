@@ -777,104 +777,184 @@ function onGyro(e) {
 }
 
 // ============================================================
-// Parallel Stereo（非対称フラスタム）
-// ── 原理 ──────────────────────────────────────
-// 両カメラは同じ方向を向き（Parallel）、
-// 射影行列のみ左右非対称にシフトして視差を生成する。
-//
-// シフト量 = (IPD/2) * near / focalLength
-//   focalLength : カメラ〜注視点の距離（焦点面）
-//   左目 : フラスタムを右にシフト（内側へ）
-//   右目 : フラスタムを左にシフト（内側へ）
+// Cardboard VR パラメータ
+// Cardboard v1 レンズ歪み係数（Google 公式値）
+// ============================================================
+const CARD_K1  = 0.441;   // 1次歪み係数
+const CARD_K2  = 0.156;   // 2次歪み係数
+const CARD_FOV = 90;      // 片目のFOV（Cardboard 標準）
+
+// 樽型歪み補正用リソース（遅延初期化）
+let _rtL = null, _rtR = null;
+let _distScene = null, _distCamera = null;
+let _distMat = null;
+
+// 歪み補正シェーダー
+const _VERT = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position.xy, 0.0, 1.0);
+  }
+`;
+
+// ── 樽型歪み補正の原理 ───────────────────────────────
+// Cardboard レンズは糸巻き型（pincushion）歪みを加える
+// → 描画時に逆の樽型（barrel）で事前補正する
+// 補正式：r' = r × (1 + k1×r² + k2×r⁴)
+// UV を外側に押し出すことで、レンズ通過後に真っすぐ見える
+const _FRAG = `
+  precision mediump float;
+  uniform sampler2D tDiffuse;
+  uniform float k1;
+  uniform float k2;
+  uniform float aspect;
+  varying vec2 vUv;
+
+  void main() {
+    // UV を中心基準の [-1, 1] に変換しアスペクト補正
+    vec2 c = (vUv - 0.5) * 2.0;
+    c.x *= aspect;
+
+    // 樽型歪み：r' = r × (1 + k1r² + k2r⁴)
+    float r2 = dot(c, c);
+    float f  = 1.0 + k1 * r2 + k2 * r2 * r2;
+    c *= f;
+
+    // アスペクト補正を戻し [0, 1] UV に戻す
+    c.x /= aspect;
+    vec2 uv = c * 0.5 + 0.5;
+
+    // レンズ外はブラック
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    } else {
+      gl_FragColor = texture2D(tDiffuse, uv);
+    }
+  }
+`;
+
+function initCardboard() {
+  if (_distScene) return; // 初期化済み
+
+  _distCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  _distScene  = new THREE.Scene();
+
+  // フルスクリーンを覆うクワッド（NDC空間で -1〜1）
+  const geo = new THREE.PlaneGeometry(2, 2);
+  _distMat = new THREE.ShaderMaterial({
+    uniforms: {
+      tDiffuse: { value: null },
+      k1:       { value: CARD_K1 },
+      k2:       { value: CARD_K2 },
+      aspect:   { value: 1.0 },
+    },
+    vertexShader:   _VERT,
+    fragmentShader: _FRAG,
+    depthTest:  false,
+    depthWrite: false,
+  });
+  _distScene.add(new THREE.Mesh(geo, _distMat));
+}
+
+function updateRenderTargets(hw, h) {
+  if (_rtL && _rtL.width === hw && _rtL.height === h) return; // サイズ変化なし
+  if (_rtL) { _rtL.dispose(); _rtR.dispose(); }
+  const opts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };
+  _rtL = new THREE.WebGLRenderTarget(hw, h, opts);
+  _rtR = new THREE.WebGLRenderTarget(hw, h, opts);
+}
+
+// ============================================================
+// 非対称フラスタム（Parallel Stereo）
+// eyeSign: 左目=+1, 右目=-1
 // ============================================================
 function buildAsymmetricFrustum(cam, eyeSign, focalLength) {
-  // eyeSign: 左目 = +1, 右目 = -1
-  // （カメラが左にオフセット → フラスタムは右 = +方向にシフト）
-  const fov    = THREE.MathUtils.degToRad(cam.fov);
+  const fov    = THREE.MathUtils.degToRad(CARD_FOV);
   const aspect = cam.aspect;
   const near   = cam.near;
   const far    = cam.far;
-
   const top    =  near * Math.tan(fov / 2);
   const bottom = -top;
   const right0 =  top * aspect;
   const left0  = -right0;
-
-  // 近クリップ面でのシフト量
-  const shift = (IPD / 2) * (near / Math.max(focalLength, 0.01)) * eyeSign;
-
-  cam.projectionMatrix.makePerspective(
-    left0  + shift,   // left
-    right0 + shift,   // right
-    top, bottom, near, far
-  );
+  const shift  = (IPD / 2) * (near / Math.max(focalLength, 0.01)) * eyeSign;
+  cam.projectionMatrix.makePerspective(left0 + shift, right0 + shift, top, bottom, near, far);
   cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
 }
 
 function renderVR() {
   const w  = canvas.width;
   const h  = canvas.height;
-  const hw = w / 2;
+  const hw = Math.floor(w / 2);
 
-  // ── カメラの向きを決定 ──
-  // ジャイロあり → vrQuat（相対回転）
-  // ジャイロなし → オービットカメラの向きをそのまま流用
+  initCardboard();
+  updateRenderTargets(hw, h);
+  _distMat.uniforms.aspect.value = hw / h;
+
+  // ── カメラ向きを決定 ──
   let baseQuat;
   if (vrBaseQuat) {
     baseQuat = vrQuat.clone();
   } else {
     const m = new THREE.Matrix4().lookAt(
-      camera.position,
-      orbitState.target,
-      new THREE.Vector3(0, 1, 0)
+      camera.position, orbitState.target, new THREE.Vector3(0, 1, 0)
     );
     baseQuat = new THREE.Quaternion().setFromRotationMatrix(m);
   }
 
-  // 右方向ベクトル（IPDオフセット用）
-  const rightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
-
-  // 焦点距離（カメラ〜注視点）
+  const rightVec    = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
   const focalLength = camera.position.distanceTo(orbitState.target);
+  const aspect      = hw / h;
 
-  const halfAspect = hw / h;
-
-  // ── 左カメラ ──
+  // ── 左カメラ設定 ──
   camL.position.copy(camera.position).addScaledVector(rightVec, -IPD / 2);
   camL.quaternion.copy(baseQuat);
   camL.matrixWorldNeedsUpdate = true;
   camL.updateMatrixWorld(true);
-  camL.fov    = camera.fov;
-  camL.aspect = halfAspect;
-  camL.near   = camera.near;
-  camL.far    = camera.far;
-  camL.updateProjectionMatrix();              // 標準フラスタムを計算
-  buildAsymmetricFrustum(camL, +1, focalLength); // 非対称に上書き
+  camL.fov = CARD_FOV; camL.aspect = aspect;
+  camL.near = camera.near; camL.far = camera.far;
+  camL.updateProjectionMatrix();
+  buildAsymmetricFrustum(camL, +1, focalLength);
 
-  // ── 右カメラ ──
+  // ── 右カメラ設定 ──
   camR.position.copy(camera.position).addScaledVector(rightVec, +IPD / 2);
   camR.quaternion.copy(baseQuat);
   camR.matrixWorldNeedsUpdate = true;
   camR.updateMatrixWorld(true);
-  camR.fov    = camera.fov;
-  camR.aspect = halfAspect;
-  camR.near   = camera.near;
-  camR.far    = camera.far;
+  camR.fov = CARD_FOV; camR.aspect = aspect;
+  camR.near = camera.near; camR.far = camera.far;
   camR.updateProjectionMatrix();
   buildAsymmetricFrustum(camR, -1, focalLength);
 
-  // ── 描画 ──
-  renderer.setScissorTest(true);
-
-  renderer.setViewport(0,  0, hw, h);
-  renderer.setScissor( 0,  0, hw, h);
+  // ── 各目をRenderTargetに描画 ──
+  renderer.setRenderTarget(_rtL);
+  renderer.clear();
   renderer.render(scene, camL);
 
-  renderer.setViewport(hw, 0, hw, h);
-  renderer.setScissor( hw, 0, hw, h);
+  renderer.setRenderTarget(_rtR);
+  renderer.clear();
   renderer.render(scene, camR);
 
+  // ── 樽型歪み補正を適用してスクリーンに合成 ──
+  renderer.setRenderTarget(null);
+  renderer.clear();
+  renderer.setScissorTest(true);
+
+  // 左目（画面左半分）
+  renderer.setViewport(0, 0, hw, h);
+  renderer.setScissor(0, 0, hw, h);
+  _distMat.uniforms.tDiffuse.value = _rtL.texture;
+  renderer.render(_distScene, _distCamera);
+
+  // 右目（画面右半分）
+  renderer.setViewport(hw, 0, hw, h);
+  renderer.setScissor(hw, 0, hw, h);
+  _distMat.uniforms.tDiffuse.value = _rtR.texture;
+  renderer.render(_distScene, _distCamera);
+
   renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, w, h);
 }
 
 // ============================================================

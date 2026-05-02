@@ -713,17 +713,20 @@ let vrBaseQuat  = null;
 const sixdof = {
   vel:          new THREE.Vector3(),
   pos:          new THREE.Vector3(),
-  rawAccel:     new THREE.Vector3(),   // センサー生値（重力込み）
-  cleanAccel:   new THREE.Vector3(),   // 重力除去後
+  rawAccel:     new THREE.Vector3(),   // 生加速度（重力込み）
+  cleanAccel:   new THREE.Vector3(),   // 重力除去済み（ブラウザ提供）
+  hpPrev:       new THREE.Vector3(),   // ハイパスフィルタ前フレーム値
+  hpOut:        new THREE.Vector3(),   // ハイパスフィルタ出力
   lastTime:     null,
   enabled:      false,
-  hasClean:     false,   // e.acceleration が使えるか
+  hasClean:     false,
   // ── チューニングパラメータ ──
-  SCALE:        0.5,     // 位置スケール（感度）
-  VEL_DAMPING:  2.5,     // 速度減衰係数（/秒）: vel *= exp(-k*dt)
-  DRIFT_K:      1.2,     // ドリフト補正係数（/秒）
-  MAX_POS:      1.2,     // 最大移動距離（m）
-  THRESHOLD:    0.08,    // 静止判定閾値（m/s²）
+  SCALE:        0.6,     // 位置スケール（感度）
+  VEL_DAMPING:  4.0,     // 速度減衰（/秒）: 大きいほど素早く止まる
+  DRIFT_K:      0.4,     // ドリフト補正（/秒）: 小さいほど位置を保持
+  MAX_POS:      1.5,     // 最大移動距離（m）
+  THRESHOLD:    0.15,    // 静止判定閾値（m/s²）
+  HP_ALPHA:     0.85,    // ハイパスフィルタ係数（重力除去強度）
 };
 
 // 重力ベクトル（ワールド座標系、Y軸下向き）
@@ -825,53 +828,55 @@ function stopMotion() {
 function updateSixDof(deltaMs) {
   if (!sixdof.enabled || !vrMode) return;
 
-  const dt = Math.min(deltaMs / 1000, 0.05); // 最大50ms（フレーム落ち対策）
+  const dt = Math.min(deltaMs / 1000, 0.05);
 
-  // ── 加速度を取得（デバイス座標系） ──
-  let accelDevice;
+  // ── 1. 重力除去済み加速度をセンサー座標系で取得 ──
+  let ax, ay, az;
+
   if (sixdof.hasClean) {
-    // ブラウザが重力除去済みの場合そのまま使う
-    accelDevice = sixdof.cleanAccel.clone();
+    // ブラウザが重力除去済みを提供（Android Chrome等）
+    ax = sixdof.cleanAccel.x;
+    ay = sixdof.cleanAccel.y;
+    az = sixdof.cleanAccel.z;
   } else {
-    // 生加速度から重力を差し引く
-    // 重力をデバイス座標系に変換: gravity_device = inv(vrQuat) * (0,-9.81,0)
-    const invQ = vrQuat.clone().invert();
-    const gravDevice = GRAVITY.clone().applyQuaternion(invQ);
-    accelDevice = sixdof.rawAccel.clone().sub(gravDevice);
+    // ハイパスフィルタで重力（直流成分）を除去
+    // α=0.85: 時定数 ≈ dt/(1-α) ≈ 100ms で重力をカット
+    const rx = sixdof.rawAccel.x;
+    const ry = sixdof.rawAccel.y;
+    const rz = sixdof.rawAccel.z;
+    const α  = sixdof.HP_ALPHA;
+    sixdof.hpOut.x = α * (sixdof.hpOut.x + rx - sixdof.hpPrev.x);
+    sixdof.hpOut.y = α * (sixdof.hpOut.y + ry - sixdof.hpPrev.y);
+    sixdof.hpOut.z = α * (sixdof.hpOut.z + rz - sixdof.hpPrev.z);
+    sixdof.hpPrev.set(rx, ry, rz);
+    ax = sixdof.hpOut.x;
+    ay = sixdof.hpOut.y;
+    az = sixdof.hpOut.z;
   }
 
-  // ── デバイス座標系 → ワールド座標系に変換 ──
-  // 画面向き補正（横持ち対応）
-  const orientDeg = (screen.orientation && screen.orientation.angle != null)
-    ? screen.orientation.angle : (window.orientation || 0);
-  const qOrient = new THREE.Quaternion().setFromAxisAngle(
-    new THREE.Vector3(0, 0, 1), -orientDeg * Math.PI / 180
-  );
-  accelDevice.applyQuaternion(qOrient);
+  // ── 2. センサー座標系 → 仮想ワールド座標系 ──
+  // vrQuat は onGyro で画面向き補正・デバイス姿勢・基準回転を
+  // すべて含んで計算済み。ここで再度 qOrient を掛けてはいけない。
+  const accelWorld = new THREE.Vector3(ax, ay, az).applyQuaternion(vrQuat);
 
-  // ジャイロのクォータニオンでワールド座標系へ
-  const accelWorld = accelDevice.applyQuaternion(vrQuat);
-
-  // ── ノイズフィルタ：静止時は無視 ──
+  // ── 3. 静止判定ノイズゲート ──
   if (accelWorld.length() < sixdof.THRESHOLD) {
     accelWorld.set(0, 0, 0);
+    // 静止中は速度も積極的に減衰させる
+    sixdof.vel.multiplyScalar(Math.exp(-sixdof.VEL_DAMPING * 3.0 * dt));
   }
 
-  // ── 速度積分（時間ベース減衰） ──
+  // ── 4. 速度積分（時間ベース減衰） ──
   sixdof.vel.addScaledVector(accelWorld, dt);
-  // exp(-k*dt) ≈ 1 - k*dt（小dt近似）で時間依存の正確な減衰
   sixdof.vel.multiplyScalar(Math.exp(-sixdof.VEL_DAMPING * dt));
 
-  // ── 位置積分 ──
+  // ── 5. 位置積分（時間ベースドリフト補正） ──
   sixdof.pos.addScaledVector(sixdof.vel, dt * sixdof.SCALE);
-
-  // ── ドリフト補正（時間ベース原点引力） ──
   sixdof.pos.multiplyScalar(Math.exp(-sixdof.DRIFT_K * dt));
 
-  // ── 最大移動距離クランプ ──
-  if (sixdof.pos.length() > sixdof.MAX_POS) {
-    sixdof.pos.setLength(sixdof.MAX_POS);
-  }
+  // ── 6. 最大移動距離クランプ ──
+  const len = sixdof.pos.length();
+  if (len > sixdof.MAX_POS) sixdof.pos.setLength(sixdof.MAX_POS);
 }
 
 function onGyro(e) {

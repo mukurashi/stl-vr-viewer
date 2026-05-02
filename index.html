@@ -701,12 +701,36 @@ let gyroEuler   = { alpha: 0, beta: 0, gamma: 0 };
 let vrQuat      = new THREE.Quaternion();
 let vrBaseQuat  = null;
 
+// ── 6DoF 位置トラッキング ──────────────────────────
+// DeviceMotionEvent の加速度を2回積分して位置を推定する。
+// ドリフト補正：静止検出時にゆっくり原点に引き戻す。
+const sixdof = {
+  vel:       new THREE.Vector3(),   // 推定速度（m/s）
+  pos:       new THREE.Vector3(),   // 推定位置オフセット（m）
+  lastTime:  null,                  // 前フレームのタイムスタンプ
+  accel:     new THREE.Vector3(),   // センサー加速度（重力補正済み）
+  enabled:   false,
+  // チューニングパラメータ
+  SCALE:     0.4,    // 位置スケール（感度）
+  DAMPING:   0.85,   // 速度減衰（フレームごと）
+  DRIFT_K:   0.02,   // ドリフト補正の強さ（原点引力）
+  MAX_POS:   0.8,    // 最大移動距離（m）
+};
+
 function enterVR() {
   if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
   vrMode = true;
   document.body.classList.add('vr-mode');
   vrBaseQuat = null;
   hideOverlay();
+  sixdof.pos.set(0, 0, 0);
+  sixdof.vel.set(0, 0, 0);
+  // VRモード開始時にキャンバスサイズをウィンドウに合わせる
+  const vvp = window.visualViewport || window;
+  renderer.setSize(
+    Math.floor(vvp.width  || window.innerWidth),
+    Math.floor(vvp.height || window.innerHeight)
+  );
 
   // ジャイロ許可リクエスト（iOS 13+）
   if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -729,6 +753,7 @@ function exitVR() {
   vrBaseQuat = null;
   document.body.classList.remove('vr-mode');
   hideOverlay();
+  stopMotion();
   window.removeEventListener('deviceorientation', onGyro, true);
   if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
   resize();
@@ -736,6 +761,67 @@ function exitVR() {
 
 function initGyro() {
   window.addEventListener('deviceorientation', onGyro, true);
+  startMotion();
+}
+
+function onMotion(e) {
+  if (!vrMode || !sixdof.enabled) return;
+
+  // acceleration = 重力を除いた純粋な運動加速度
+  const a = e.acceleration;
+  if (!a || (a.x === null && a.y === null)) return;
+
+  sixdof.accel.set(
+    a.x || 0,
+    a.y || 0,
+    a.z || 0
+  );
+}
+
+function startMotion() {
+  sixdof.vel.set(0, 0, 0);
+  sixdof.pos.set(0, 0, 0);
+  sixdof.lastTime = null;
+  sixdof.enabled  = true;
+  window.addEventListener('devicemotion', onMotion, true);
+}
+
+function stopMotion() {
+  sixdof.enabled = false;
+  sixdof.vel.set(0, 0, 0);
+  sixdof.pos.set(0, 0, 0);
+  window.removeEventListener('devicemotion', onMotion, true);
+}
+
+function updateSixDof(deltaMs) {
+  if (!sixdof.enabled || !vrMode) return;
+
+  const dt = Math.min(deltaMs / 1000, 0.05); // 最大50ms
+
+  // センサー加速度をワールド座標系に変換（ジャイロのクォータニオンを使用）
+  const accelWorld = sixdof.accel.clone().applyQuaternion(vrQuat);
+
+  // ノイズフィルタ：微小加速度は無視（静止時のドリフト防止）
+  const THRESHOLD = 0.12; // m/s²
+  if (accelWorld.length() < THRESHOLD) {
+    accelWorld.set(0, 0, 0);
+  }
+
+  // 速度積分
+  sixdof.vel.addScaledVector(accelWorld, dt);
+  // 速度減衰（高周波ノイズ除去）
+  sixdof.vel.multiplyScalar(sixdof.DAMPING);
+
+  // 位置積分
+  sixdof.pos.addScaledVector(sixdof.vel, dt * sixdof.SCALE);
+
+  // ドリフト補正：原点への引力（静止時に自然に戻る）
+  sixdof.pos.multiplyScalar(1.0 - sixdof.DRIFT_K);
+
+  // 最大移動距離クランプ
+  if (sixdof.pos.length() > sixdof.MAX_POS) {
+    sixdof.pos.setLength(sixdof.MAX_POS);
+  }
 }
 
 function onGyro(e) {
@@ -879,10 +965,21 @@ function hideOverlay() {
 }
 
 function renderVR() {
-  // canvas.width/height はレンダラーが設定した物理ピクセル数
-  const W  = renderer.domElement.width;
-  const H  = renderer.domElement.height;
-  const hw = Math.floor(W / 2);
+  // Three.js の setViewport/setScissor は CSS論理ピクセルで指定する。
+  // renderer.domElement.width は物理ピクセル（DPR倍）なので使わない。
+  // visualViewport はiOSのアドレスバー表示/非表示に関わらず
+  // 実際に描画可能な領域を返す
+  const vvp = window.visualViewport || window;
+  const W   = Math.floor(vvp.width  || window.innerWidth);
+  const H   = Math.floor(vvp.height || window.innerHeight);
+  const hw  = Math.floor(W / 2);
+
+  // 6DoF：deltaTimeを計算して位置を更新
+  const now = performance.now();
+  if (sixdof.lastTime !== null) {
+    updateSixDof(now - sixdof.lastTime);
+  }
+  sixdof.lastTime = now;
 
   // カメラの向きを決定
   let baseQuat;
@@ -902,7 +999,9 @@ function renderVR() {
   const aspect = hw / H;
 
   // ── 左カメラ設定 ──
-  camL.position.copy(camera.position).addScaledVector(rightVec, -IPD / 2);
+  // 6DoFオフセット：スマホの平行移動をカメラ位置に反映
+  const posOffset = sixdof.pos.clone();
+  camL.position.copy(camera.position).add(posOffset).addScaledVector(rightVec, -IPD / 2);
   camL.quaternion.copy(baseQuat);
   camL.matrixWorldNeedsUpdate = true;
   camL.updateMatrixWorld(true);
@@ -914,7 +1013,7 @@ function renderVR() {
   buildAsymmetricFrustum(camL, +1, focalLength);
 
   // ── 右カメラ設定 ──
-  camR.position.copy(camera.position).addScaledVector(rightVec, +IPD / 2);
+  camR.position.copy(camera.position).add(posOffset).addScaledVector(rightVec, +IPD / 2);
   camR.quaternion.copy(baseQuat);
   camR.matrixWorldNeedsUpdate = true;
   camR.updateMatrixWorld(true);

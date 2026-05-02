@@ -703,19 +703,31 @@ let vrBaseQuat  = null;
 
 // ── 6DoF 位置トラッキング ──────────────────────────
 // DeviceMotionEvent の加速度を2回積分して位置を推定する。
-// ドリフト補正：静止検出時にゆっくり原点に引き戻す。
+//
+// 重力除去：e.acceleration（重力補正済み）を優先。
+// nullの場合はジャイロのクォータニオンでワールド重力を
+// デバイス座標系に変換して差し引く（iOS対応）。
+//
+// ドリフト補正：速度・位置に時間ベースの減衰を適用。
+// 静止すると自然に原点に戻る。
 const sixdof = {
-  vel:       new THREE.Vector3(),   // 推定速度（m/s）
-  pos:       new THREE.Vector3(),   // 推定位置オフセット（m）
-  lastTime:  null,                  // 前フレームのタイムスタンプ
-  accel:     new THREE.Vector3(),   // センサー加速度（重力補正済み）
-  enabled:   false,
-  // チューニングパラメータ
-  SCALE:     0.4,    // 位置スケール（感度）
-  DAMPING:   0.85,   // 速度減衰（フレームごと）
-  DRIFT_K:   0.02,   // ドリフト補正の強さ（原点引力）
-  MAX_POS:   0.8,    // 最大移動距離（m）
+  vel:          new THREE.Vector3(),
+  pos:          new THREE.Vector3(),
+  rawAccel:     new THREE.Vector3(),   // センサー生値（重力込み）
+  cleanAccel:   new THREE.Vector3(),   // 重力除去後
+  lastTime:     null,
+  enabled:      false,
+  hasClean:     false,   // e.acceleration が使えるか
+  // ── チューニングパラメータ ──
+  SCALE:        0.5,     // 位置スケール（感度）
+  VEL_DAMPING:  2.5,     // 速度減衰係数（/秒）: vel *= exp(-k*dt)
+  DRIFT_K:      1.2,     // ドリフト補正係数（/秒）
+  MAX_POS:      1.2,     // 最大移動距離（m）
+  THRESHOLD:    0.08,    // 静止判定閾値（m/s²）
 };
+
+// 重力ベクトル（ワールド座標系、Y軸下向き）
+const GRAVITY = new THREE.Vector3(0, -9.81, 0);
 
 function enterVR() {
   if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
@@ -767,23 +779,40 @@ function initGyro() {
 function onMotion(e) {
   if (!vrMode || !sixdof.enabled) return;
 
-  // acceleration = 重力を除いた純粋な運動加速度
-  const a = e.acceleration;
-  if (!a || (a.x === null && a.y === null)) return;
+  const aClean = e.acceleration;                  // 重力除去済み（対応ブラウザ）
+  const aRaw   = e.accelerationIncludingGravity;  // 常に利用可能
 
-  sixdof.accel.set(
-    a.x || 0,
-    a.y || 0,
-    a.z || 0
-  );
+  if (aClean && aClean.x !== null && Math.abs(aClean.x) + Math.abs(aClean.y) + Math.abs(aClean.z) > 0) {
+    // 方法A: ブラウザが重力除去済み加速度を提供してくれる場合
+    sixdof.hasClean = true;
+    sixdof.cleanAccel.set(aClean.x || 0, aClean.y || 0, aClean.z || 0);
+  } else if (aRaw && aRaw.x !== null) {
+    // 方法B: 生加速度からジャイロで重力を差し引く（iOSなど）
+    sixdof.hasClean = false;
+    sixdof.rawAccel.set(aRaw.x || 0, aRaw.y || 0, aRaw.z || 0);
+  }
 }
 
 function startMotion() {
   sixdof.vel.set(0, 0, 0);
   sixdof.pos.set(0, 0, 0);
   sixdof.lastTime = null;
-  sixdof.enabled  = true;
-  window.addEventListener('devicemotion', onMotion, true);
+  sixdof.enabled  = false;
+
+  const doStart = () => {
+    sixdof.enabled = true;
+    window.addEventListener('devicemotion', onMotion, true);
+  };
+
+  // iOS 13+: DeviceMotionEvent にも許可が必要
+  if (typeof DeviceMotionEvent !== 'undefined' &&
+      typeof DeviceMotionEvent.requestPermission === 'function') {
+    DeviceMotionEvent.requestPermission()
+      .then(state => { if (state === 'granted') doStart(); })
+      .catch(() => doStart());
+  } else {
+    doStart();
+  }
 }
 
 function stopMotion() {
@@ -796,29 +825,50 @@ function stopMotion() {
 function updateSixDof(deltaMs) {
   if (!sixdof.enabled || !vrMode) return;
 
-  const dt = Math.min(deltaMs / 1000, 0.05); // 最大50ms
+  const dt = Math.min(deltaMs / 1000, 0.05); // 最大50ms（フレーム落ち対策）
 
-  // センサー加速度をワールド座標系に変換（ジャイロのクォータニオンを使用）
-  const accelWorld = sixdof.accel.clone().applyQuaternion(vrQuat);
+  // ── 加速度を取得（デバイス座標系） ──
+  let accelDevice;
+  if (sixdof.hasClean) {
+    // ブラウザが重力除去済みの場合そのまま使う
+    accelDevice = sixdof.cleanAccel.clone();
+  } else {
+    // 生加速度から重力を差し引く
+    // 重力をデバイス座標系に変換: gravity_device = inv(vrQuat) * (0,-9.81,0)
+    const invQ = vrQuat.clone().invert();
+    const gravDevice = GRAVITY.clone().applyQuaternion(invQ);
+    accelDevice = sixdof.rawAccel.clone().sub(gravDevice);
+  }
 
-  // ノイズフィルタ：微小加速度は無視（静止時のドリフト防止）
-  const THRESHOLD = 0.12; // m/s²
-  if (accelWorld.length() < THRESHOLD) {
+  // ── デバイス座標系 → ワールド座標系に変換 ──
+  // 画面向き補正（横持ち対応）
+  const orientDeg = (screen.orientation && screen.orientation.angle != null)
+    ? screen.orientation.angle : (window.orientation || 0);
+  const qOrient = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 0, 1), -orientDeg * Math.PI / 180
+  );
+  accelDevice.applyQuaternion(qOrient);
+
+  // ジャイロのクォータニオンでワールド座標系へ
+  const accelWorld = accelDevice.applyQuaternion(vrQuat);
+
+  // ── ノイズフィルタ：静止時は無視 ──
+  if (accelWorld.length() < sixdof.THRESHOLD) {
     accelWorld.set(0, 0, 0);
   }
 
-  // 速度積分
+  // ── 速度積分（時間ベース減衰） ──
   sixdof.vel.addScaledVector(accelWorld, dt);
-  // 速度減衰（高周波ノイズ除去）
-  sixdof.vel.multiplyScalar(sixdof.DAMPING);
+  // exp(-k*dt) ≈ 1 - k*dt（小dt近似）で時間依存の正確な減衰
+  sixdof.vel.multiplyScalar(Math.exp(-sixdof.VEL_DAMPING * dt));
 
-  // 位置積分
+  // ── 位置積分 ──
   sixdof.pos.addScaledVector(sixdof.vel, dt * sixdof.SCALE);
 
-  // ドリフト補正：原点への引力（静止時に自然に戻る）
-  sixdof.pos.multiplyScalar(1.0 - sixdof.DRIFT_K);
+  // ── ドリフト補正（時間ベース原点引力） ──
+  sixdof.pos.multiplyScalar(Math.exp(-sixdof.DRIFT_K * dt));
 
-  // 最大移動距離クランプ
+  // ── 最大移動距離クランプ ──
   if (sixdof.pos.length() > sixdof.MAX_POS) {
     sixdof.pos.setLength(sixdof.MAX_POS);
   }

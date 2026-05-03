@@ -307,50 +307,14 @@
   #boot-canvas {
     position: absolute; inset: 0; width: 100%; height: 100%;
   }
-  #boot-ui {
-    position: relative; z-index: 2;
-    display: flex; flex-direction: column; align-items: center;
-    gap: 18px; padding: 40px;
-    width: min(520px, 90vw);
-  }
-  #boot-logo {
-    font-family: var(--mono, monospace);
-    font-size: clamp(36px, 8vw, 64px);
-    letter-spacing: 8px;
-    color: #00e5ff;
-    text-transform: uppercase;
-  }
-  #boot-logo span { color: #ff6b35; }
-  #boot-sub {
-    font-family: var(--mono, monospace);
-    font-size: 12px; letter-spacing: 4px;
-    color: #4a6278; text-transform: uppercase;
-  }
-  #boot-lines {
-    width: 100%; min-height: 120px;
-    font-family: var(--mono, monospace);
-    font-size: 11px; line-height: 1.8;
-    color: #1d9e75;
-    border: 1px solid #0d2a1a;
-    padding: 10px 14px;
-    overflow: hidden;
-    background: rgba(0,20,10,.6);
-  }
-  #boot-bar-wrap {
-    width: 100%; height: 3px;
-    background: #0d1520;
-  }
-  #boot-bar {
-    height: 100%; width: 0%;
-    background: #00e5ff;
-    transition: width .12s linear;
-  }
-  #boot-status {
-    font-family: var(--mono, monospace);
-    font-size: 11px; letter-spacing: 3px;
-    color: #4a6278; text-transform: uppercase;
-    align-self: flex-end;
-  }
+  
+  
+  
+  
+  
+  
+  
+  
 
 /* ===== 起動シーケンス ===== */
 #boot-overlay {
@@ -463,12 +427,7 @@
 .log-dim  { color: #445; }
 
 /* 右：ステータスパネル */
-#boot-status {
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+
 .boot-status-title {
   font-size: 9px;
   letter-spacing: 3px;
@@ -677,11 +636,7 @@
 
 <div id="boot-screen">
 <canvas id="boot-canvas"></canvas>
-<div id="boot-ui">
-  <div id="boot-logo">STL<span>://</span>VR</div>
-  <div id="boot-sub">SPATIAL VIEWER v1.0</div>
-  <div id="boot-lines"></div>
-  <div id="boot-bar-wrap"><div id="boot-bar"></div></div>
+
   <div id="boot-status">INITIALIZING...</div>
 </div>
 </div>
@@ -1835,100 +1790,8 @@ function generateDefaultTerrain() {
 })();
 
 // ============================================================
-// 起動画面アニメーション
+// 起動画面アニメーション（MAGIシステム起動シーケンス）
 // ============================================================
-(function bootSequence() {
-  const screen  = document.getElementById('boot-screen');
-  const lines   = document.getElementById('boot-lines');
-  const bar     = document.getElementById('boot-bar');
-  const status  = document.getElementById('boot-status');
-  const bc      = document.getElementById('boot-canvas');
-
-  // ── パーティクル背景 ──
-  const ctx = bc.getContext('2d');
-  let W, H, particles = [];
-  function resizeBC() {
-    W = bc.width  = bc.offsetWidth;
-    H = bc.height = bc.offsetHeight;
-  }
-  resizeBC();
-  window.addEventListener('resize', resizeBC);
-
-  for (let i = 0; i < 80; i++) {
-    particles.push({
-      x: Math.random() * 1200,
-      y: Math.random() * 800,
-      vx: (Math.random() - .5) * .4,
-      vy: (Math.random() - .5) * .4,
-      r: Math.random() * 1.5 + .3,
-      a: Math.random() * .5 + .1
-    });
-  }
-
-  let animId;
-  function drawBg() {
-    ctx.clearRect(0, 0, W, H);
-    particles.forEach(p => {
-      p.x = (p.x + p.vx + W) % W;
-      p.y = (p.y + p.vy + H) % H;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-      ctx.fillStyle = `rgba(0,229,255,${p.a})`;
-      ctx.fill();
-    });
-    // 接近粒子間の線
-    particles.forEach((a, i) => {
-      for (let j = i+1; j < particles.length; j++) {
-        const b = particles[j];
-        const d = Math.hypot(a.x-b.x, a.y-b.y);
-        if (d < 90) {
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = `rgba(0,229,255,${.15 * (1-d/90)})`;
-          ctx.lineWidth = .5;
-          ctx.stroke();
-        }
-      }
-    });
-    animId = requestAnimationFrame(drawBg);
-  }
-  drawBg();
-
-  // ── 起動ログシーケンス ──
-  const LOG = [
-    { t:  80, p: 5,  msg: '[BOOT] Power-on self-test... OK',           col: '#1d9e75' },
-    { t: 200, p: 12, msg: '[INIT] Loading WebGL renderer',              col: '#1d9e75' },
-    { t: 380, p: 22, msg: '[INIT] Three.js r128 initialized',           col: '#1d9e75' },
-    { t: 520, p: 32, msg: '[SYS]  Allocating scene graph',              col: '#1d9e75' },
-    { t: 680, p: 42, msg: '[SYS]  Lighting subsystem ready',            col: '#1d9e75' },
-    { t: 820, p: 52, msg: '[VR]   Stereo camera pair configured',       col: '#00e5ff' },
-    { t: 960, p: 62, msg: '[VR]   Gyroscope interface loaded',          col: '#00e5ff' },
-    { t:1100, p: 72, msg: '[VR]   Barrel distortion shader compiled',   col: '#00e5ff' },
-    { t:1250, p: 84, msg: '[STL]  Parser ready (ASCII + Binary)',       col: '#1d9e75' },
-    { t:1380, p: 92, msg: '[SYS]  Default terrain generated',           col: '#1d9e75' },
-    { t:1480, p:100, msg: '[BOOT] All systems nominal. Launching...',   col: '#ff6b35' },
-  ];
-
-  LOG.forEach(({t, p, msg, col}) => {
-    setTimeout(() => {
-      const el = document.createElement('div');
-      el.style.cssText = `color:${col}; opacity:0; transition:opacity .2s`;
-      el.textContent = '> ' + msg;
-      lines.appendChild(el);
-      requestAnimationFrame(() => el.style.opacity = '1');
-      lines.scrollTop = lines.scrollHeight;
-      bar.style.width = p + '%';
-      status.textContent = p < 100 ? `LOADING ${p}%...` : 'READY';
-    }, t);
-  });
-
-  // ── 完了後フェードアウト ──
-  setTimeout(() => {
-    cancelAnimationFrame(animId);
-    screen.classList.add('fade-out');
-    setTimeout(() => { screen.style.display = 'none'; }, 650);
-  }, 1950);
-})();
 
 // ============================================================
 // 初期カメラ位置

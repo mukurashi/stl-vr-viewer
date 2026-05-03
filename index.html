@@ -295,18 +295,10 @@
     );
   }
 
-  /* ── 起動画面 ── */
-  #boot-screen {
-    position: fixed; inset: 0; z-index: 9999;
-    background: #000;
-    display: flex; align-items: center; justify-content: center;
-    overflow: hidden;
-    transition: opacity .6s ease;
-  }
-  #boot-screen.fade-out { opacity: 0; pointer-events: none; }
-  #boot-canvas {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-  }
+  
+  
+  
+  
   
   
   
@@ -634,11 +626,7 @@
 </div>
 
 
-<div id="boot-screen">
-<canvas id="boot-canvas"></canvas>
 
-  <div id="boot-status">INITIALIZING...</div>
-</div>
 </div>
 <canvas id="canvas"></canvas>
 <div id="vr-divider"></div>
@@ -1061,13 +1049,28 @@ let _rawGamma = 0;  // 左右傾き（度）
 // ============================================================
 
 const orbital = {
-  radius:         3.0,
-  targetRadius:   3.0,
-  minRadius:      0.3,
-  maxRadius:      12.0,
-  offset:         new THREE.Vector3(),
-  targetOffset:   new THREE.Vector3(),
-  baseQuat:       null,
+  radius:       3.0,     // 実際の描画距離（スムーズ追従）
+  _targetRadius:3.0,     // センサーが書き込む目標距離
+  minRadius:    0.3,
+  maxRadius:    12.0,
+  offset:       new THREE.Vector3(),  // 実際のオフセット
+  _targetOffset:new THREE.Vector3(),  // センサーが書き込む目標オフセット
+  baseQuat:     null,
+  // センサー関連（onMotionが書き込む）
+  vel:          new THREE.Vector3(),
+  gravCalib:    null,
+  calibBuf:     [],
+  calibDone:    false,
+  rawAccel:     new THREE.Vector3(),
+  hasClean:     false,
+  // パラメータ
+  CALIB_N:      90,
+  THRESHOLD:    0.18,
+  VEL_DAMP:     5.0,
+  DRIFT_K:      0.15,
+  FORWARD_K:    0.6,
+  LATERAL_K:    0.4,
+  MAX_OFFSET:   2.0,
 };
 
 // ── VRモード中のタッチ操作（前後移動・横移動） ──────────
@@ -1103,14 +1106,14 @@ function initVRTouch() {
     vrTouch.lastY = t.clientY;
 
     // 縦スワイプ → 前後移動（radius変化）
-    orbital.targetRadius -= dy * 0.015;
-    orbital.targetRadius  = Math.max(orbital.minRadius,
-                            Math.min(orbital.maxRadius, orbital.targetRadius));
+    orbital._targetRadius -= dy * 0.015;
+    orbital._targetRadius  = Math.max(orbital.minRadius,
+                            Math.min(orbital.maxRadius, orbital._targetRadius));
 
     // 横スワイプ → 横移動（offset）
     const worldRight = new THREE.Vector3(1, 0, 0).applyQuaternion(vrAbsQuat);
-    orbital.targetOffset.addScaledVector(worldRight, dx * 0.008);
-    if (orbital.targetOffset.length() > 3.0) orbital.targetOffset.setLength(3.0);
+    orbital._targetOffset.addScaledVector(worldRight, dx * 0.008);
+    if (orbital._targetOffset.length() > 3.0) orbital._targetOffset.setLength(3.0);
 
   }, { passive: false });
 
@@ -1217,106 +1220,21 @@ function updateMotion(dt) {
   orbital.radius += (orbital._targetRadius - orbital.radius) * Math.min(1, dt * 8);
   const worldRight = new THREE.Vector3(1, 0, 0).applyQuaternion(vrAbsQuat);
   const worldUp    = new THREE.Vector3(0, 1, 0).applyQuaternion(vrAbsQuat);
-  orbital.offset.addScaledVector(worldRight, orbital.vel.x * orbital.LATERAL_K);
-  orbital.offset.addScaledVector(worldUp,    orbital.vel.y * orbital.LATERAL_K);
-  if (orbital.offset.length() > orbital.MAX_OFFSET)
-    orbital.offset.setLength(orbital.MAX_OFFSET);
-  orbital.offset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
+  orbital._targetOffset.addScaledVector(worldRight, orbital.vel.x * orbital.LATERAL_K);
+  orbital._targetOffset.addScaledVector(worldUp,    orbital.vel.y * orbital.LATERAL_K);
+  if (orbital._targetOffset.length() > orbital.MAX_OFFSET)
+    orbital._targetOffset.setLength(orbital.MAX_OFFSET);
+  orbital._targetOffset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
 }
 
 function enterVR() {// ===== モーション（加速度センサー）=====
-function onMotion(e) {
-  if (!vrMode) return;
-  const aC = e.acceleration;
-  const aR = e.accelerationIncludingGravity;
-  if (aC && aC.x !== null &&
-      (Math.abs(aC.x) + Math.abs(aC.y) + Math.abs(aC.z)) > 0.001) {
-    orbital.hasClean  = true;
-    orbital.calibDone = true;
-    orbital.rawAccel.set(aC.x || 0, aC.y || 0, aC.z || 0);
-  } else if (aR && aR.x !== null) {
-    orbital.rawAccel.set(aR.x || 0, aR.y || 0, aR.z || 0);
-    orbital.calibDone = true;
-  }
-}
 
-function startMotion() {
-  orbital.vel.set(0, 0, 0);
-  orbital.offset.set(0, 0, 0);
-  orbital.calibDone  = false;
-  orbital.hasClean   = false;
-  orbital._targetRadius = orbital.radius;
-  const doStart = () => {
-    window.addEventListener('devicemotion', onMotion, true);
-  };
-  if (typeof DeviceMotionEvent !== 'undefined' &&
-      typeof DeviceMotionEvent.requestPermission === 'function') {
-    DeviceMotionEvent.requestPermission()
-      .then(s => { if (s === 'granted') doStart(); })
-      .catch(() => doStart());
-  } else {
-    doStart();
-  }
-}
 
-function stopMotion() {
-  orbital.vel.set(0, 0, 0);
-  orbital.offset.set(0, 0, 0);
-  window.removeEventListener('devicemotion', onMotion, true);
-}
 
-function updateMotion(dt) {
-  if (!vrMode || !orbital.calibDone) return;
-  let mx, my, mz;
-  if (orbital.hasClean) {
-    mx = orbital.rawAccel.x;
-    my = orbital.rawAccel.y;
-    mz = orbital.rawAccel.z;
-  } else {
-    const bR = _rawBeta  * Math.PI / 180;
-    const gR = _rawGamma * Math.PI / 180;
-    const gX = -Math.sin(gR)                * 9.81;
-    const gY =  Math.sin(bR) * Math.cos(gR) * 9.81;
-    const gZ = -Math.cos(bR) * Math.cos(gR) * 9.81;
-    mx = orbital.rawAccel.x - gX;
-    my = orbital.rawAccel.y - gY;
-    mz = orbital.rawAccel.z - gZ;
-  }
-  const mag = Math.sqrt(mx*mx + my*my + mz*mz);
-  if (mag < orbital.THRESHOLD) {
-    orbital.vel.multiplyScalar(Math.exp(-orbital.VEL_DAMP * 4 * dt));
-    orbital.offset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
-    if (orbital._targetRadius !== undefined)
-      orbital.radius += (orbital._targetRadius - orbital.radius) * 0.05;
-    return;
-  }
-  const orientDeg = (screen.orientation && screen.orientation.angle != null)
-    ? screen.orientation.angle : (window.orientation || 0);
-  let fwd, lat, vert;
-  if (Math.abs(orientDeg - 90) < 45) {
-    fwd = mx; lat = -my; vert = -mz;
-  } else if (Math.abs(orientDeg - 270) < 45 || Math.abs(orientDeg + 90) < 45) {
-    fwd = -mx; lat = my; vert = -mz;
-  } else {
-    fwd = -mz; lat = mx; vert = -my;
-  }
-  orbital.vel.x += lat  * dt;
-  orbital.vel.y += vert * dt;
-  orbital.vel.z += fwd  * dt;
-  orbital.vel.multiplyScalar(Math.exp(-orbital.VEL_DAMP * dt));
-  if (!orbital._targetRadius) orbital._targetRadius = orbital.radius;
-  orbital._targetRadius -= orbital.vel.z * orbital.FORWARD_K;
-  orbital._targetRadius  = Math.max(orbital.minRadius,
-                           Math.min(orbital.maxRadius, orbital._targetRadius));
-  orbital.radius += (orbital._targetRadius - orbital.radius) * Math.min(1, dt * 8);
-  const worldRight = new THREE.Vector3(1, 0, 0).applyQuaternion(vrAbsQuat);
-  const worldUp    = new THREE.Vector3(0, 1, 0).applyQuaternion(vrAbsQuat);
-  orbital.offset.addScaledVector(worldRight, orbital.vel.x * orbital.LATERAL_K);
-  orbital.offset.addScaledVector(worldUp,    orbital.vel.y * orbital.LATERAL_K);
-  if (orbital.offset.length() > orbital.MAX_OFFSET)
-    orbital.offset.setLength(orbital.MAX_OFFSET);
-  orbital.offset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
-}
+
+
+
+
 
 function enterVR() {
   if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
@@ -1325,7 +1243,7 @@ function enterVR() {
   vrBaseQuat   = null;
   orbital.baseQuat = null;
   orbital.offset.set(0, 0, 0);
-  orbital.targetOffset.set(0, 0, 0);
+  orbital._targetOffset.set(0, 0, 0);
   hideOverlay();
 
   // VRモード開始時にキャンバスサイズをウィンドウに合わせる
@@ -1342,7 +1260,7 @@ function enterVR() {
     box.getSize(sz);
     const r = sz.length() * 1.1;
     orbital.radius       = r;
-    orbital.targetRadius = r;
+    orbital._targetRadius = r;
   }
 
   // ジャイロ許可リクエスト（iOS 13+）
@@ -1524,15 +1442,23 @@ function hideOverlay() {
   if (_overlayCanvas) _overlayCanvas.style.display = 'none';
 }
 
+// VR描画フレームのdeltaTime計測用
+let _vrLastTime = null;
+
 function renderVR() {
   const vvp = window.visualViewport || window;
   const W   = Math.floor(vvp.width  || window.innerWidth);
   const H   = Math.floor(vvp.height || window.innerHeight);
   const hw  = Math.floor(W / 2);
 
-  // ── radius・offsetをスムーズに追従 ──
-  orbital.radius += (orbital.targetRadius - orbital.radius) * 0.12;
-  orbital.offset.lerp(orbital.targetOffset, 0.12);
+  // deltaTime計算してセンサー積分
+  const now = performance.now();
+  const dt  = _vrLastTime !== null ? Math.min((now - _vrLastTime) / 1000, 0.05) : 0;
+  _vrLastTime = now;
+  if (dt > 0) updateMotion(dt);
+  // スムーズ追従
+  orbital.radius += (orbital._targetRadius - orbital.radius) * 0.12;
+  orbital.offset.lerp(orbital._targetOffset, 0.12);
 
   // ── 球面周回カメラ ──
   const target = orbitState.target.clone().add(orbital.offset);

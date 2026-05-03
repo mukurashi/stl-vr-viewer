@@ -734,11 +734,11 @@ const orbital = {
   // パラメータ
   CALIB_N:    90,             // キャリブサンプル数（約1.5秒@60Hz）
   THRESHOLD:  0.18,           // ノイズゲート（m/s²）
-  VEL_DAMP:   5.0,            // 速度減衰（/秒）
-  DRIFT_K:    0.15,           // ドリフト補正（/秒）
-  FORWARD_K:  0.6,            // 前後感度（radius変化）
-  LATERAL_K:  0.4,            // 横移動感度
-  MAX_OFFSET: 2.0,            // 横移動最大量
+  VEL_DAMP:   4.5,            // 速度減衰（/秒）
+  DRIFT_K:    0.08,           // ドリフト補正（/秒）
+  FORWARD_K:  1.0,            // 前後感度（radius変化）
+  LATERAL_K:  0.8,            // 横移動感度
+  MAX_OFFSET: 3.0,            // 横移動最大量
 };
 
 // ── 加速度センサーイベント ──
@@ -898,6 +898,7 @@ function enterVR() {
     const sz  = new THREE.Vector3();
     box.getSize(sz);
     orbital.radius = sz.length() * 1.1;
+    orbital._targetRadius = orbital.radius;
   }
 
   // ジャイロ許可リクエスト（iOS 13+）
@@ -1122,6 +1123,7 @@ function renderVR() {
 
     // 通常カメラの位置を上書き
     camera.position.copy(vrCamPos);
+    camera.up.set(0, 1, 0);
     camera.lookAt(target);
   }
 

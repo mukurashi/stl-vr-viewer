@@ -876,46 +876,50 @@ function updateMotion(dt) {
   orbital.offset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
 }
 
+// function enterVR() {
+//   if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
+//   vrMode = true;
+//   document.body.classList.add('vr-mode');
+//   vrBaseQuat   = null;
+//   orbital.baseQuat = null;
+//   orbital.vel.set(0, 0, 0);
+//   orbital.offset.set(0, 0, 0);
+//   hideOverlay();
+
+//   // VRモード開始時にキャンバスサイズをウィンドウに合わせる
+//   const vvp = window.visualViewport || window;
+//   renderer.setSize(
+//     Math.floor(vvp.width  || window.innerWidth),
+//     Math.floor(vvp.height || window.innerHeight)
+//   );
+
+//   // オブジェクトのバウンディングボックスから周回半径を決定
+//   if (meshGroup) {
+//     const box = new THREE.Box3().setFromObject(meshGroup);
+//     const sz  = new THREE.Vector3();
+//     box.getSize(sz);
+//     orbital.radius = sz.length() * 1.1;
+//     orbital._targetRadius = orbital.radius;
+//   }
+
+//   // ジャイロ許可リクエスト（iOS 13+）
+//   if (typeof DeviceOrientationEvent !== 'undefined' &&
+//       typeof DeviceOrientationEvent.requestPermission === 'function') {
+//     DeviceOrientationEvent.requestPermission()
+//       .then(state => { if (state === 'granted') initGyro(); })
+//       .catch(() => initGyro());
+//   } else {
+//     initGyro();
+//   }
+
+//   // フルスクリーン
+//   if (document.documentElement.requestFullscreen) {
+//     document.documentElement.requestFullscreen().catch(() => {});
+//   }
+// }
+
 function enterVR() {
-  if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
-  vrMode = true;
-  document.body.classList.add('vr-mode');
-  vrBaseQuat   = null;
-  orbital.baseQuat = null;
-  orbital.vel.set(0, 0, 0);
-  orbital.offset.set(0, 0, 0);
-  hideOverlay();
-
-  // VRモード開始時にキャンバスサイズをウィンドウに合わせる
-  const vvp = window.visualViewport || window;
-  renderer.setSize(
-    Math.floor(vvp.width  || window.innerWidth),
-    Math.floor(vvp.height || window.innerHeight)
-  );
-
-  // オブジェクトのバウンディングボックスから周回半径を決定
-  if (meshGroup) {
-    const box = new THREE.Box3().setFromObject(meshGroup);
-    const sz  = new THREE.Vector3();
-    box.getSize(sz);
-    orbital.radius = sz.length() * 1.1;
-    orbital._targetRadius = orbital.radius;
-  }
-
-  // ジャイロ許可リクエスト（iOS 13+）
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission()
-      .then(state => { if (state === 'granted') initGyro(); })
-      .catch(() => initGyro());
-  } else {
-    initGyro();
-  }
-
-  // フルスクリーン
-  if (document.documentElement.requestFullscreen) {
-    document.documentElement.requestFullscreen().catch(() => {});
-  }
+  alert('VRモードは一時的に無効化されています');
 }
 
 function exitVR() {

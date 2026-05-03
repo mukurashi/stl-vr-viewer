@@ -700,79 +700,76 @@ let vrMode = false;
 let gyroEuler   = { alpha: 0, beta: 0, gamma: 0 };
 let vrQuat      = new THREE.Quaternion();
 let vrBaseQuat  = null;
-let vrAbsQuat   = new THREE.Quaternion(); // 絶対姿勢（重力除去に使用）
+let vrAbsQuat   = new THREE.Quaternion();
+// DeviceOrientationの生角度（重力計算に使用）
+let _rawBeta  = 0;  // 前後傾き（度）
+let _rawGamma = 0;  // 左右傾き（度）
 
-// ── 6DoF 位置トラッキング ──────────────────────────
-// 方式：キャリブレーション済み重力ベクトルによる差し引き
+// ============================================================
+// 球面周回カメラ方式（Orbital VR）
+// ────────────────────────────────────────────────────
+// 加速度センサーの2重積分は現実的に使えない（ドリフト爆発）。
+// 代わりにジャイロの絶対姿勢からカメラ位置を球面上で計算する。
 //
-// 起動時に静止状態で加速度を平均してgravCalibを確定。
-// 以降 rawAccel - gravCalib = 純粋な運動加速度として使用。
-// これにより double-integration のドリフト源である重力混入を防ぐ。
-const sixdof = {
-  pos:          new THREE.Vector3(),   // カメラオフセット（ワールド座標）
-  vel:          new THREE.Vector3(),   // 推定速度
-  gravCalib:    new THREE.Vector3(),   // キャリブレーション済み重力
-  calibSamples: [],                    // キャリブ用サンプルバッファ
-  calibDone:    false,
-  rawAccel:     new THREE.Vector3(),
-  lastTime:     null,
-  enabled:      false,
-  // ── パラメータ ──
-  CALIB_SEC:    1.5,   // キャリブレーション時間（秒）
-  SCALE:        1.8,   // 位置スケール
-  VEL_DAMP:     6.0,   // 速度減衰（/秒）
-  DRIFT_K:      0.08,  // ドリフト補正（/秒）※小さいほど位置を保持
-  THRESHOLD:    0.25,  // ノイズゲート（m/s²）
-  MAX_POS:      2.0,   // 最大移動距離（m）
+//   カメラ位置 = オブジェクト中心 + vrAbsQuat * (0, 0, orbitRadius)
+//
+// スマホを左に向ける → カメラが右に移動 → 左側から見る
+// スマホを上に向ける → カメラが下に移動 → 上から見る
+// これにより「その場にオブジェクトがある」感覚が生まれる。
+// ============================================================
+
+const orbital = {
+  radius:     3.0,            // オブジェクトからの距離
+  minRadius:  0.3,            // 最小距離
+  maxRadius:  10.0,           // 最大距離
+  baseQuat:   null,
+  // ── 加速度センサーによる位置トラッキング ──
+  vel:        new THREE.Vector3(),   // 速度（デバイス座標系）
+  offset:     new THREE.Vector3(),   // 位置オフセット（ワールド座標）
+  gravCalib:  null,           // キャリブ済み重力（デバイス座標）
+  calibBuf:   [],             // キャリブ用サンプル
+  calibDone:  false,
+  rawAccel:   new THREE.Vector3(),
+  hasClean:   false,          // e.acceleration が使えるか
+  // パラメータ
+  CALIB_N:    90,             // キャリブサンプル数（約1.5秒@60Hz）
+  THRESHOLD:  0.18,           // ノイズゲート（m/s²）
+  VEL_DAMP:   5.0,            // 速度減衰（/秒）
+  DRIFT_K:    0.15,           // ドリフト補正（/秒）
+  FORWARD_K:  0.6,            // 前後感度（radius変化）
+  LATERAL_K:  0.4,            // 横移動感度
+  MAX_OFFSET: 2.0,            // 横移動最大量
 };
 
-// ── 加速度センサー受信 ──
+// ── 加速度センサーイベント ──
 function onMotion(e) {
-  if (!vrMode || !sixdof.enabled) return;
+  if (!vrMode) return;
 
-  // Android: e.acceleration が使える。iOS: null なので rawAccel を使う
   const aC = e.acceleration;
   const aR = e.accelerationIncludingGravity;
 
-  if (aC && aC.x !== null && (Math.abs(aC.x) + Math.abs(aC.y) + Math.abs(aC.z)) > 0.001) {
-    // Android Chrome 等：重力除去済み加速度をそのまま使う
-    if (!sixdof.calibDone) {
-      // Android でも calibDone を true にして即使用開始
-      sixdof.gravCalib.set(0, 0, 0);
-      sixdof.calibDone = true;
-    }
-    sixdof.rawAccel.set(aC.x, aC.y, aC.z);
+  if (aC && aC.x !== null) {
+    // Android Chrome: 重力除去済み。初回データで即座に有効化
+    orbital.hasClean  = true;
+    orbital.calibDone = true;
+    orbital.rawAccel.set(aC.x || 0, aC.y || 0, aC.z || 0);
   } else if (aR && aR.x !== null) {
-    // iOS 等：生加速度を蓄積してキャリブレーション
-    sixdof.rawAccel.set(aR.x || 0, aR.y || 0, aR.z || 0);
-
-    if (!sixdof.calibDone) {
-      sixdof.calibSamples.push(sixdof.rawAccel.clone());
-      const needed = Math.ceil(sixdof.CALIB_SEC * 60);
-      if (sixdof.calibSamples.length >= needed) {
-        // 平均を重力ベクトルとして確定
-        const sum = new THREE.Vector3();
-        sixdof.calibSamples.forEach(v => sum.add(v));
-        sixdof.gravCalib.copy(sum).divideScalar(sixdof.calibSamples.length);
-        sixdof.calibDone = true;
-        sixdof.calibSamples = [];
-        console.log('6DoF calibration done:', sixdof.gravCalib.toArray());
-      }
-    }
+    // iOS: 重力込み加速度を蓄積
+    orbital.rawAccel.set(aR.x || 0, aR.y || 0, aR.z || 0);
+    // 初回データで即座に有効化（重力除去はオイラー角で行う）
+    orbital.calibDone = true;
   }
 }
 
 function startMotion() {
-  sixdof.pos.set(0, 0, 0);
-  sixdof.vel.set(0, 0, 0);
-  sixdof.gravCalib.set(0, 0, 0);
-  sixdof.calibSamples = [];
-  sixdof.calibDone    = false;
-  sixdof.lastTime     = null;
-  sixdof.enabled      = false;
+  orbital.vel.set(0, 0, 0);
+  orbital.offset.set(0, 0, 0);
+  orbital.gravCalib  = null;
+  orbital.calibBuf   = [];
+  orbital.calibDone  = false;
+  orbital.hasClean   = false;
 
   const doStart = () => {
-    sixdof.enabled = true;
     window.addEventListener('devicemotion', onMotion, true);
   };
 
@@ -787,59 +784,106 @@ function startMotion() {
 }
 
 function stopMotion() {
-  sixdof.enabled = false;
-  sixdof.pos.set(0, 0, 0);
-  sixdof.vel.set(0, 0, 0);
+  orbital.vel.set(0, 0, 0);
+  orbital.offset.set(0, 0, 0);
   window.removeEventListener('devicemotion', onMotion, true);
 }
 
-function updateSixDof(deltaMs) {
-  if (!sixdof.enabled || !sixdof.calibDone || !vrMode) return;
+// ── 加速度を積分してorbital.radius/offsetを更新 ──
+function updateMotion(dt) {
+  if (!vrMode || !orbital.calibDone) return;
 
-  const dt = Math.min(deltaMs / 1000, 0.05);
+  let motionX, motionY, motionZ;
 
-  // ── 1. キャリブ済み重力を差し引いてデバイス座標の運動加速度を得る ──
-  const motion = new THREE.Vector3(
-    sixdof.rawAccel.x - sixdof.gravCalib.x,
-    sixdof.rawAccel.y - sixdof.gravCalib.y,
-    sixdof.rawAccel.z - sixdof.gravCalib.z
-  );
-
-  // ── 2. デバイス座標 → ワールド座標に変換 ──
-  // vrAbsQuat = デバイスの絶対姿勢クォータニオン（onGyroで更新）
-  const motionWorld = motion.applyQuaternion(vrAbsQuat);
-
-  // ── 3. ノイズゲート ──
-  const mag = motionWorld.length();
-  if (mag < sixdof.THRESHOLD) {
-    motionWorld.set(0, 0, 0);
-    // 静止中は速度を強制減衰
-    sixdof.vel.multiplyScalar(Math.exp(-sixdof.VEL_DAMP * 4.0 * dt));
+  if (orbital.hasClean) {
+    // ── Android: e.accelerationが重力除去済み ──
+    motionX = orbital.rawAccel.x;
+    motionY = orbital.rawAccel.y;
+    motionZ = orbital.rawAccel.z;
+  } else {
+    // ── iOS: オイラー角から重力をデバイス座標系で計算して差し引く ──
+    // W3C仕様に基づくデバイス座標系の重力分解：
+    //   beta  = 前後傾き（度）、gamma = 左右傾き（度）
+    //   gX = -sin(gamma) * 9.81
+    //   gY =  sin(beta) * cos(gamma) * 9.81
+    //   gZ = -cos(beta) * cos(gamma) * 9.81
+    const bR = _rawBeta  * Math.PI / 180;
+    const gR = _rawGamma * Math.PI / 180;
+    const gX = -Math.sin(gR)                    * 9.81;
+    const gY =  Math.sin(bR) * Math.cos(gR)     * 9.81;
+    const gZ = -Math.cos(bR) * Math.cos(gR)     * 9.81;
+    motionX = orbital.rawAccel.x - gX;
+    motionY = orbital.rawAccel.y - gY;
+    motionZ = orbital.rawAccel.z - gZ;
   }
 
-  // ── 4. 速度・位置積分 ──
-  sixdof.vel.addScaledVector(motionWorld, dt);
-  sixdof.vel.multiplyScalar(Math.exp(-sixdof.VEL_DAMP * dt));
-
-  sixdof.pos.addScaledVector(sixdof.vel, dt * sixdof.SCALE);
-
-  // ── 5. ゆるやかなドリフト補正（積分誤差を長時間かけて戻す） ──
-  sixdof.pos.multiplyScalar(Math.exp(-sixdof.DRIFT_K * dt));
-
-  // ── 6. 最大移動クランプ ──
-  if (sixdof.pos.length() > sixdof.MAX_POS) {
-    sixdof.pos.setLength(sixdof.MAX_POS);
+  // ── ノイズゲート ──
+  const mag = Math.sqrt(motionX*motionX + motionY*motionY + motionZ*motionZ);
+  if (mag < orbital.THRESHOLD) {
+    orbital.vel.multiplyScalar(Math.exp(-orbital.VEL_DAMP * 4 * dt));
+    orbital.offset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
+    orbital.radius += (orbital._targetRadius - orbital.radius) * 0.05;
+    return;
   }
+
+  // ── デバイス座標系での前後・横成分 ──
+  // 横持ち(landscape)時の画面方向補正
+  const orientDeg = (screen.orientation && screen.orientation.angle != null)
+    ? screen.orientation.angle : (window.orientation || 0);
+
+  let fwd, lat, vert;
+  if (Math.abs(orientDeg - 90) < 45) {
+    // 右横持ち: デバイスX→前後, デバイスY→横
+    fwd  =  motionX;
+    lat  = -motionY;
+    vert = -motionZ;
+  } else if (Math.abs(orientDeg - 270) < 45 || Math.abs(orientDeg + 90) < 45) {
+    // 左横持ち
+    fwd  = -motionX;
+    lat  =  motionY;
+    vert = -motionZ;
+  } else {
+    // 縦持ち
+    fwd  = -motionZ;
+    lat  =  motionX;
+    vert = -motionY;
+  }
+
+  // ── 速度積分 ──
+  orbital.vel.x += lat  * dt;
+  orbital.vel.y += vert * dt;
+  orbital.vel.z += fwd  * dt;
+  orbital.vel.multiplyScalar(Math.exp(-orbital.VEL_DAMP * dt));
+
+  // ── 前後: radiusを直接変化 ──
+  if (!orbital._targetRadius) orbital._targetRadius = orbital.radius;
+  orbital._targetRadius -= orbital.vel.z * orbital.FORWARD_K;
+  orbital._targetRadius  = Math.max(orbital.minRadius,
+                           Math.min(orbital.maxRadius, orbital._targetRadius));
+  // 滑らかに追従
+  orbital.radius += (orbital._targetRadius - orbital.radius) * Math.min(1, dt * 8);
+
+  // ── 横移動: ワールド座標でtargetをオフセット ──
+  const worldRight = new THREE.Vector3(1, 0, 0).applyQuaternion(vrAbsQuat);
+  const worldUp    = new THREE.Vector3(0, 1, 0).applyQuaternion(vrAbsQuat);
+  orbital.offset.addScaledVector(worldRight, orbital.vel.x * orbital.LATERAL_K);
+  orbital.offset.addScaledVector(worldUp,    orbital.vel.y * orbital.LATERAL_K);
+
+  if (orbital.offset.length() > orbital.MAX_OFFSET) {
+    orbital.offset.setLength(orbital.MAX_OFFSET);
+  }
+  orbital.offset.multiplyScalar(Math.exp(-orbital.DRIFT_K * dt));
 }
 
 function enterVR() {
   if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
   vrMode = true;
   document.body.classList.add('vr-mode');
-  vrBaseQuat = null;
+  vrBaseQuat   = null;
+  orbital.baseQuat = null;
+  orbital.vel.set(0, 0, 0);
+  orbital.offset.set(0, 0, 0);
   hideOverlay();
-  sixdof.pos.set(0, 0, 0);
-  sixdof.vel.set(0, 0, 0);
 
   // VRモード開始時にキャンバスサイズをウィンドウに合わせる
   const vvp = window.visualViewport || window;
@@ -847,6 +891,14 @@ function enterVR() {
     Math.floor(vvp.width  || window.innerWidth),
     Math.floor(vvp.height || window.innerHeight)
   );
+
+  // オブジェクトのバウンディングボックスから周回半径を決定
+  if (meshGroup) {
+    const box = new THREE.Box3().setFromObject(meshGroup);
+    const sz  = new THREE.Vector3();
+    box.getSize(sz);
+    orbital.radius = sz.length() * 1.1;
+  }
 
   // ジャイロ許可リクエスト（iOS 13+）
   if (typeof DeviceOrientationEvent !== 'undefined' &&
@@ -867,6 +919,7 @@ function enterVR() {
 function exitVR() {
   vrMode = false;
   vrBaseQuat = null;
+  orbital.baseQuat = null;
   document.body.classList.remove('vr-mode');
   hideOverlay();
   stopMotion();
@@ -887,6 +940,9 @@ function onGyro(e) {
   const alpha = (e.alpha || 0) * DEG;
   const beta  = (e.beta  || 0) * DEG;
   const gamma = (e.gamma || 0) * DEG;
+  // 生角度を保存（加速度の重力除去に使用）
+  _rawBeta  = e.beta  || 0;
+  _rawGamma = e.gamma || 0;
 
   // 画面の向き（ラジアン）
   // screen.orientation.angle: 0=縦, 90=右横, 270=左横
@@ -1023,47 +1079,63 @@ function hideOverlay() {
   if (_overlayCanvas) _overlayCanvas.style.display = 'none';
 }
 
+// VR描画のdeltaTime計測
+let _vrLastTime = null;
+
 function renderVR() {
-  // Three.js の setViewport/setScissor は CSS論理ピクセルで指定する。
-  // renderer.domElement.width は物理ピクセル（DPR倍）なので使わない。
-  // visualViewport はiOSのアドレスバー表示/非表示に関わらず
-  // 実際に描画可能な領域を返す
   const vvp = window.visualViewport || window;
   const W   = Math.floor(vvp.width  || window.innerWidth);
   const H   = Math.floor(vvp.height || window.innerHeight);
   const hw  = Math.floor(W / 2);
 
-  // 6DoF：deltaTimeを計算して位置を更新
+  // deltaTime計算して加速度センサー積分
   const now = performance.now();
-  if (sixdof.lastTime !== null) {
-    updateSixDof(now - sixdof.lastTime);
+  if (_vrLastTime !== null) {
+    const dt = Math.min((now - _vrLastTime) / 1000, 0.05);
+    updateMotion(dt);
   }
-  sixdof.lastTime = now;
+  _vrLastTime = now;
 
-  // カメラの向きを決定
-  let baseQuat;
+  // ── 球面周回カメラ計算 ──────────────────────────────
+  // ジャイロの絶対姿勢 vrAbsQuat から
+  // オブジェクト中心を周回するカメラ位置を計算する。
+  //
+  // 基本アイデア：
+  //   スマホ正面方向 = vrAbsQuat * (0,0,-1)
+  //   カメラはオブジェクトから「スマホ正面の逆方向」にいる
+  //   → カメラ位置 = center + normalize(スマホ背面方向) * radius
+  //
+  // これにより：
+  //   スマホを左に向ける → カメラが右に回り込む → 左側から見える
+  //   スマホを上に向ける → カメラが下に回り込む → 上から見える
+
+  // オブジェクト中心
+  const target = orbitState.target.clone();
+
   if (vrBaseQuat) {
-    baseQuat = vrQuat.clone();
-  } else {
-    const m = new THREE.Matrix4().lookAt(
-      camera.position, orbitState.target, new THREE.Vector3(0, 1, 0)
-    );
-    baseQuat = new THREE.Quaternion().setFromRotationMatrix(m);
+    // ── スマホ背面方向をワールド座標で計算 ──
+    // デバイスのZ+ = 背面 → これをワールド座標系に変換
+    const back = new THREE.Vector3(0, 0, 1).applyQuaternion(vrQuat);
+
+    // カメラ位置 = 中心 + 背面方向 × 周回半径 + スマホ移動オフセット
+    const vrCamPos = target.clone().addScaledVector(back, orbital.radius).add(orbital.offset);
+
+    // 通常カメラの位置を上書き
+    camera.position.copy(vrCamPos);
+    camera.lookAt(target);
   }
 
-  const rightVec    = new THREE.Vector3(1, 0, 0).applyQuaternion(baseQuat);
-  const focalLength = Math.max(
-    camera.position.distanceTo(orbitState.target), 0.1
-  );
-  const aspect = hw / H;
+  // 右方向ベクトル（IPD計算用）
+  const forward  = target.clone().sub(camera.position).normalize();
+  const up       = new THREE.Vector3(0, 1, 0);
+  const rightVec = new THREE.Vector3().crossVectors(forward, up).normalize();
 
-  // ── 左カメラ設定 ──
-  // 6DoFオフセット：スマホの平行移動をカメラ位置に反映
-  const posOffset = sixdof.pos.clone();
-  camL.position.copy(camera.position).add(posOffset).addScaledVector(rightVec, -IPD / 2);
-  camL.quaternion.copy(baseQuat);
-  camL.matrixWorldNeedsUpdate = true;
-  camL.updateMatrixWorld(true);
+  const focalLength = Math.max(camera.position.distanceTo(target), 0.1);
+  const aspect      = hw / H;
+
+  // ── 左カメラ ──
+  camL.position.copy(camera.position).addScaledVector(rightVec, -IPD / 2);
+  camL.lookAt(target);
   camL.fov    = CARD_FOV;
   camL.aspect = aspect;
   camL.near   = camera.near;
@@ -1071,11 +1143,9 @@ function renderVR() {
   camL.updateProjectionMatrix();
   buildAsymmetricFrustum(camL, +1, focalLength);
 
-  // ── 右カメラ設定 ──
-  camR.position.copy(camera.position).add(posOffset).addScaledVector(rightVec, +IPD / 2);
-  camR.quaternion.copy(baseQuat);
-  camR.matrixWorldNeedsUpdate = true;
-  camR.updateMatrixWorld(true);
+  // ── 右カメラ ──
+  camR.position.copy(camera.position).addScaledVector(rightVec, +IPD / 2);
+  camR.lookAt(target);
   camR.fov    = CARD_FOV;
   camR.aspect = aspect;
   camR.near   = camera.near;
@@ -1083,20 +1153,17 @@ function renderVR() {
   camR.updateProjectionMatrix();
   buildAsymmetricFrustum(camR, -1, focalLength);
 
-  // ── 直接viewport/scissorで各目を描画 ──
+  // ── 描画 ──
   renderer.setScissorTest(true);
 
-  // 左目（画面左半分）
   renderer.setViewport(0,  0, hw, H);
   renderer.setScissor( 0,  0, hw, H);
   renderer.render(scene, camL);
 
-  // 右目（画面右半分）
   renderer.setViewport(hw, 0, hw, H);
   renderer.setScissor( hw, 0, hw, H);
   renderer.render(scene, camR);
 
-  // 状態リセット
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, W, H);
 }
@@ -1317,6 +1384,6 @@ function generateDefaultTerrain() {
 // 初期カメラ位置
 // ============================================================
 updateCameraFromOrbit();
-</script>
+}</script>
 </body>
 </html>

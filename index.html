@@ -723,6 +723,7 @@ const orbital = {
   minRadius:  0.3,            // 最小距離
   maxRadius:  10.0,           // 最大距離
   baseQuat:   null,
+  _targetRadius: null,        // ターゲット半径
   // ── 加速度センサーによる位置トラッキング ──
   vel:        new THREE.Vector3(),   // 速度（デバイス座標系）
   offset:     new THREE.Vector3(),   // 位置オフセット（ワールド座標）
@@ -1123,7 +1124,6 @@ function renderVR() {
 
     // 通常カメラの位置を上書き
     camera.position.copy(vrCamPos);
-    camera.up.set(0, 1, 0);
     camera.lookAt(target);
   }
 

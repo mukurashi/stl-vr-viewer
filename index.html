@@ -351,9 +351,329 @@
     color: #4a6278; text-transform: uppercase;
     align-self: flex-end;
   }
+
+/* ===== 起動シーケンス ===== */
+#boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'Share Tech Mono', 'Courier New', monospace;
+  color: #e8f400;
+}
+
+/* スキャンライン */
+#boot-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 3px,
+    rgba(0,0,0,0.18) 3px,
+    rgba(0,0,0,0.18) 4px
+  );
+  pointer-events: none;
+  z-index: 2;
+  animation: scanroll 8s linear infinite;
+}
+@keyframes scanroll {
+  from { background-position: 0 0; }
+  to   { background-position: 0 100%; }
+}
+
+/* 上部ヘッダー */
+#boot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 18px 24px 0;
+  border-bottom: 1px solid #e8f40044;
+  z-index: 3;
+}
+.boot-title {
+  font-size: clamp(10px, 2.5vw, 14px);
+  letter-spacing: 4px;
+  line-height: 1.8;
+  color: #e8f400;
+}
+.boot-logo {
+  font-size: clamp(18px, 5vw, 32px);
+  font-weight: 900;
+  letter-spacing: 8px;
+  color: #ff6200;
+  text-shadow: 0 0 20px #ff620088;
+  animation: logopulse 2s ease-in-out infinite;
+}
+@keyframes logopulse {
+  0%,100% { text-shadow: 0 0 20px #ff620088; }
+  50%      { text-shadow: 0 0 40px #ff6200cc, 0 0 80px #ff620044; }
+}
+.boot-id {
+  font-size: clamp(8px, 1.8vw, 11px);
+  letter-spacing: 2px;
+  color: #666;
+  text-align: right;
+  line-height: 1.9;
+}
+
+/* メイン表示エリア */
+#boot-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  z-index: 3;
+  overflow: hidden;
+}
+
+/* 左：システムログ */
+#boot-log {
+  border-right: 1px solid #e8f40033;
+  padding: 16px 20px;
+  overflow: hidden;
+  position: relative;
+}
+.boot-log-title {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: #666;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #333;
+  padding-bottom: 6px;
+}
+.log-line {
+  font-size: clamp(8px, 1.6vw, 11px);
+  line-height: 1.7;
+  opacity: 0;
+  transform: translateX(-8px);
+  transition: opacity 0.15s, transform 0.15s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.log-line.show { opacity: 1; transform: translateX(0); }
+.log-ok   { color: #00ff88; }
+.log-warn { color: #ff6200; }
+.log-info { color: #e8f400; }
+.log-dim  { color: #445; }
+
+/* 右：ステータスパネル */
+#boot-status {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.boot-status-title {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: #666;
+  border-bottom: 1px solid #333;
+  padding-bottom: 6px;
+}
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: clamp(8px, 1.6vw, 10px);
+  letter-spacing: 1px;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.status-item.show { opacity: 1; }
+.status-label { color: #667; }
+.status-bar {
+  width: 45%;
+  height: 4px;
+  background: #111;
+  position: relative;
+  overflow: hidden;
+}
+.status-bar-fill {
+  height: 100%;
+  background: linear-gradient(to right, #e8f400, #00ff88);
+  width: 0%;
+  transition: width 1.2s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 0 8px #e8f40088;
+}
+.status-val { color: #e8f400; font-size: clamp(7px,1.4vw,10px); }
+
+/* 中央ピログレスバー */
+#boot-progress-wrap {
+  z-index: 3;
+  padding: 12px 24px;
+  border-top: 1px solid #e8f40022;
+}
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: clamp(8px,1.6vw,10px);
+  letter-spacing: 2px;
+  color: #667;
+  margin-bottom: 6px;
+}
+#boot-progress-bar {
+  width: 100%;
+  height: 3px;
+  background: #111;
+  position: relative;
+  overflow: hidden;
+}
+#boot-progress-fill {
+  height: 100%;
+  background: linear-gradient(to right, #e8f400, #00ff88, #ff6200);
+  width: 0%;
+  transition: width 0.4s ease;
+  box-shadow: 0 0 12px #e8f400;
+}
+
+/* フッター */
+#boot-footer {
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 24px 14px;
+  font-size: clamp(7px,1.4vw,9px);
+  letter-spacing: 2px;
+  color: #333;
+  border-top: 1px solid #1a1a1a;
+}
+
+/* フラッシュ演出 */
+#boot-flash {
+  position: absolute;
+  inset: 0;
+  background: #e8f400;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 10;
+  transition: opacity 0.08s;
+}
+
+/* 完了フェードアウト */
+#boot-overlay.fadeout {
+  animation: bootfadeout 0.6s ease forwards;
+}
+@keyframes bootfadeout {
+  0%   { opacity: 1; filter: brightness(1); }
+  40%  { opacity: 1; filter: brightness(3) saturate(0); }
+  100% { opacity: 0; filter: brightness(1); }
+}
+
+/* 縦線デコレーション */
+.boot-vline {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, #e8f40033 40%, #e8f40033 60%, transparent);
+  pointer-events: none;
+}
+
+/* 警告点滅 */
+@keyframes blink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+.blink { animation: blink 0.6s step-end infinite; }
+
 </style>
 </head>
 <body>
+
+<!-- ===== 起動シーケンスオーバーレイ ===== -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<div id="boot-overlay">
+  <div id="boot-flash"></div>
+  <div class="boot-vline" style="left:30%"></div>
+  <div class="boot-vline" style="right:30%"></div>
+
+  <div id="boot-header">
+    <div class="boot-title">
+      MAGI SYSTEM Ver.3.0.2<br>
+      TACTICAL VISUALIZATION UNIT
+    </div>
+    <div class="boot-logo">STL//VR</div>
+    <div class="boot-id">
+      UNIT-ID: STV-0156<br>
+      CLASSIFIED: LEVEL-5<br>
+      <span id="boot-clock">00:00:00</span>
+    </div>
+  </div>
+
+  <div id="boot-main">
+    <div id="boot-log">
+      <div class="boot-log-title">─── SYSTEM DIAGNOSTICS ───────────────</div>
+      <div id="log-container"></div>
+    </div>
+    <div id="boot-status">
+      <div class="boot-status-title">─── SUBSYSTEM STATUS ─────────────────</div>
+      <div class="status-item" id="st-0">
+        <span class="status-label">RENDER ENGINE</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-0"></div></div>
+        <span class="status-val" id="sv-0">---%</span>
+      </div>
+      <div class="status-item" id="st-1">
+        <span class="status-label">SENSOR ARRAY</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-1"></div></div>
+        <span class="status-val" id="sv-1">---%</span>
+      </div>
+      <div class="status-item" id="st-2">
+        <span class="status-label">SPATIAL PROC.</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-2"></div></div>
+        <span class="status-val" id="sv-2">---%</span>
+      </div>
+      <div class="status-item" id="st-3">
+        <span class="status-label">GYRO SYNC</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-3"></div></div>
+        <span class="status-val" id="sv-3">---%</span>
+      </div>
+      <div class="status-item" id="st-4">
+        <span class="status-label">STEREO OPTICS</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-4"></div></div>
+        <span class="status-val" id="sv-4">---%</span>
+      </div>
+      <div class="status-item" id="st-5">
+        <span class="status-label">A.T.FIELD SYNC</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-5"></div></div>
+        <span class="status-val" id="sv-5">---%</span>
+      </div>
+      <div class="status-item" id="st-6">
+        <span class="status-label">COCKPIT LINK</span>
+        <div class="status-bar"><div class="status-bar-fill" id="sf-6"></div></div>
+        <span class="status-val" id="sv-6">---%</span>
+      </div>
+      <div style="margin-top:auto; font-size:9px; letter-spacing:2px; color:#333; line-height:2">
+        NERV-GEO FRONT<br>
+        LABOR CONTROL DIV.<br>
+        SV2 UNIT / SHAFT-K9
+      </div>
+    </div>
+  </div>
+
+  <div id="boot-progress-wrap">
+    <div class="progress-label">
+      <span id="boot-phase">PHASE 1 / HARDWARE INIT</span>
+      <span id="boot-pct">0%</span>
+    </div>
+    <div id="boot-progress-bar">
+      <div id="boot-progress-fill"></div>
+    </div>
+  </div>
+
+  <div id="boot-footer">
+    <span>CLASSIFIED // INTERNAL USE ONLY</span>
+    <span>MAGI-01 / MAGI-02 / MAGI-03 : <span style="color:#00ff88">ONLINE</span></span>
+    <span>SYNCHRONIZATION RATE: <span id="sync-rate" style="color:#ff6200">0.0%</span></span>
+  </div>
+</div>
+
 
 <div id="boot-screen">
 <canvas id="boot-canvas"></canvas>
@@ -1424,6 +1744,178 @@ function generateDefaultTerrain() {
 // 初期カメラ位置
 // ============================================================
 updateCameraFromOrbit();
-}</script>
+}
+
+// ===== 起動シーケンス =====
+(function() {
+  const LOG_LINES = [
+    ['dim',  'BIOS POST v2.14.8 ... PASS'],
+    ['ok',   'CPU CORE CHECK ............. OK'],
+    ['ok',   'MEMORY 8192MB .............. OK'],
+    ['ok',   'GPU INIT [WebGL 2.0] ....... OK'],
+    ['info', 'LOADING THREE.JS r128 ......'],
+    ['ok',   'THREE.JS ................... OK'],
+    ['ok',   'STL PARSER MODULE .......... OK'],
+    ['warn', 'GYRO SENSOR ........... STANDBY'],
+    ['ok',   'DEVICE ORIENTATION API ..... OK'],
+    ['info', 'CALIBRATING IMU ...........'],
+    ['ok',   'IMU CALIBRATION ............ OK'],
+    ['ok',   'STEREO RENDER [CARDBOARD] .. OK'],
+    ['warn', 'A.T.FIELD ............. STANDBY'],
+    ['ok',   'VR OPTICS MODULE ........... OK'],
+    ['ok',   'BARREL DISTORTION .......... OK'],
+    ['info', 'LOADING DEFAULT TERRAIN ....'],
+    ['ok',   'TERRAIN GEN [PERLIN] ....... OK'],
+    ['ok',   'STL LOADER ................. OK'],
+    ['ok',   'OVERLAY RENDERER ........... OK'],
+    ['ok',   'INPUT HANDLER .............. OK'],
+    ['ok',   'ALL SYSTEMS ................ GO'],
+    ['warn', '>>> INITIALIZING LAUNCH SEQUENCE <<<'],
+  ];
+
+  const PHASES = [
+    'PHASE 1 / HARDWARE INIT',
+    'PHASE 2 / SENSOR CALIBRATION',
+    'PHASE 3 / VR SYSTEM BOOT',
+    'PHASE 4 / TERRAIN LOAD',
+    'PHASE 5 / LAUNCH READY',
+  ];
+
+  const STATUS_TARGETS = [100, 100, 100, 100, 100, 87.3, 100];
+
+  let logIdx    = 0;
+  let progress  = 0;
+  let syncRate  = 0;
+  const logCont = document.getElementById('log-container');
+  const pfill   = document.getElementById('boot-progress-fill');
+  const pct     = document.getElementById('boot-pct');
+  const phase   = document.getElementById('boot-phase');
+  const clock   = document.getElementById('boot-clock');
+  const sync    = document.getElementById('sync-rate');
+  const flash   = document.getElementById('boot-flash');
+
+  // 時計
+  const startTime = Date.now();
+  const clockTick = setInterval(() => {
+    const ms = Date.now() - startTime;
+    const s  = Math.floor(ms / 1000) % 60;
+    const m  = Math.floor(ms / 60000) % 60;
+    const h  = Math.floor(ms / 3600000);
+    clock.textContent =
+      String(h).padStart(2,'0') + ':' +
+      String(m).padStart(2,'0') + ':' +
+      String(s).padStart(2,'0');
+  }, 100);
+
+  // ログ追加
+  function addLog() {
+    if (logIdx >= LOG_LINES.length) return;
+    const [type, text] = LOG_LINES[logIdx++];
+    const div = document.createElement('div');
+    div.className = 'log-line log-' + type;
+    div.textContent = '> ' + text;
+    logCont.appendChild(div);
+    // 最大表示行を制限
+    if (logCont.children.length > 14) {
+      logCont.children[0].style.opacity = '0';
+      setTimeout(() => {
+        if (logCont.children.length > 14) logCont.children[0].remove();
+      }, 200);
+    }
+    requestAnimationFrame(() => { div.classList.add('show'); });
+  }
+
+  // プログレス更新
+  function setProgress(val, phaseIdx) {
+    progress = val;
+    pfill.style.width = val + '%';
+    pct.textContent   = Math.round(val) + '%';
+    if (phaseIdx !== undefined) phase.textContent = PHASES[phaseIdx];
+  }
+
+  // ステータスバー更新
+  function showStatus(idx, targetVal) {
+    const st = document.getElementById('st-' + idx);
+    const sf = document.getElementById('sf-' + idx);
+    const sv = document.getElementById('sv-' + idx);
+    if (!st) return;
+    st.classList.add('show');
+    let cur = 0;
+    const step = () => {
+      cur = Math.min(cur + targetVal / 25, targetVal);
+      sf.style.width = cur + '%';
+      sv.textContent = cur.toFixed(1) + '%';
+      if (cur < targetVal) setTimeout(step, 40);
+    };
+    step();
+  }
+
+  // フラッシュ
+  function doFlash(cb) {
+    flash.style.opacity = '0.7';
+    setTimeout(() => {
+      flash.style.opacity = '0';
+      setTimeout(cb, 100);
+    }, 80);
+  }
+
+  // シーケンス本体
+  const seq = [
+    // [delay, fn]
+    [0,    () => { addLog(); setProgress(2); }],
+    [120,  () => { addLog(); setProgress(6); }],
+    [200,  () => { addLog(); setProgress(10); }],
+    [280,  () => { addLog(); setProgress(14); }],
+    [380,  () => { addLog(); setProgress(18); showStatus(0, 0); }],
+    [520,  () => { addLog(); setProgress(22); showStatus(0, STATUS_TARGETS[0]); }],
+    [700,  () => { addLog(); setProgress(28); showStatus(1, 0); setProgress(28, 1); }],
+    [860,  () => { addLog(); setProgress(34); showStatus(1, STATUS_TARGETS[1]); }],
+    [1020, () => { addLog(); setProgress(40); showStatus(2, STATUS_TARGETS[2]); }],
+    [1180, () => { addLog(); setProgress(46); showStatus(3, 0); }],
+    [1380, () => { addLog(); setProgress(52); showStatus(3, STATUS_TARGETS[3]); setProgress(52, 2); }],
+    [1560, () => { addLog(); setProgress(58); showStatus(4, STATUS_TARGETS[4]); }],
+    [1720, () => { addLog(); setProgress(64); showStatus(5, 0); }],
+    [1900, () => { addLog(); setProgress(70); showStatus(5, STATUS_TARGETS[5]); }],
+    [2060, () => { addLog(); setProgress(76); showStatus(6, 0); setProgress(76, 3); }],
+    [2240, () => { addLog(); setProgress(82); showStatus(6, STATUS_TARGETS[6]); }],
+    [2400, () => { addLog(); setProgress(88); }],
+    [2560, () => { addLog(); setProgress(92); }],
+    [2720, () => { addLog(); setProgress(96); }],
+    [2880, () => { addLog(); setProgress(100, 4);
+      // 同期率カウントアップ
+      let sr = 0;
+      const up = setInterval(() => {
+        sr = Math.min(sr + 2.3, 89.7);
+        sync.textContent = sr.toFixed(1) + '%';
+        if (sr >= 89.7) clearInterval(up);
+      }, 30);
+    }],
+    [3100, () => { addLog(); }],
+    [3400, () => {
+      addLog(); // 最後のWARNING
+      // 点滅3回してフェードアウト
+      let n = 0;
+      const blink = setInterval(() => {
+        doFlash(() => {});
+        n++;
+        if (n >= 3) {
+          clearInterval(blink);
+          setTimeout(() => {
+            clearInterval(clockTick);
+            const overlay = document.getElementById('boot-overlay');
+            overlay.classList.add('fadeout');
+            overlay.addEventListener('animationend', () => {
+              overlay.remove();
+            });
+          }, 300);
+        }
+      }, 180);
+    }],
+  ];
+
+  seq.forEach(([delay, fn]) => setTimeout(fn, delay));
+})();
+
+</script>
 </body>
 </html>

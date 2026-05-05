@@ -1696,6 +1696,22 @@ updateCameraFromOrbit();
 (function() {
   'use strict';
 
+  // DOM要素取得（nullガード付き）
+  const getEl = id => document.getElementById(id);
+  const log    = getEl('boot-log');
+  const fill   = getEl('boot-bar-fill');
+  const phLbl  = getEl('boot-phase-label');
+  const pctLbl = getEl('boot-pct-label');
+  const timeLbl= getEl('boot-time');
+  const ftrR   = getEl('boot-ftr-r');
+  const boot   = getEl('boot');
+
+  // 必須要素チェック
+  if (!boot || !log || !fill) {
+    console.error('Boot elements not found');
+    return;
+  }
+
   const LINES = [
     ['dim',  ' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],
     ['dim',  ' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],
@@ -1733,100 +1749,107 @@ updateCameraFromOrbit();
     'LAUNCH',
   ];
 
-  const log    = document.getElementById('boot-log');
-  const fill   = document.getElementById('boot-bar-fill');
-  const phLbl  = document.getElementById('boot-phase-label');
-  const pctLbl = document.getElementById('boot-pct-label');
-  const timeLbl= document.getElementById('boot-time');
-  const ftrR   = document.getElementById('boot-ftr-r');
-  const boot   = document.getElementById('boot');
+  // シーケンス: [経過ms, lineIdx, pct, phaseIdx?, ftrTxt?]
+  const SEQ = [
+    [0,    0,  2],
+    [120,  1,  4],
+    [220,  2,  5],
+    [320,  3, 10, 0],
+    [440,  4, 14],
+    [560,  5, 18],
+    [680,  6, 22],
+    [800,  7, 27, 1],
+    [920,  8, 31],
+    [1040, 9, 35, undefined, 'HELMETCAM: SEARCHING...'],
+    [1160, 10, 38],
+    [1280, 11, 42, 2],
+    [1400, 12, 48],
+    [1520, 13, 54, 3],
+    [1640, 14, 59],
+    [1760, 15, 64],
+    [1880, 16, 69],
+    [1980, 17, 72],
+    [2080, 18, 76, 4],
+    [2200, 19, 82, undefined, 'HELMETCAM: OFFLINE'],
+    [2320, 20, 87],
+    [2420, 21, 90],
+    [2540, 22, 93],
+    [2660, 23, 97, 5],
+    [2820, 24, 100],
+  ];
 
-  // 経過時間時計
-  const t0 = Date.now();
-  const clk = setInterval(() => {
-    const ms = Date.now() - t0;
+  // DOM操作
+  function addLine(type, text) {
+    if (!log) return;
+    const el = document.createElement('div');
+    el.className = 'bl ' + type;
+    el.textContent = text;
+    log.appendChild(el);
+    while (log.children.length > 14) {
+      const rem = log.children[0];
+      rem.style.opacity = '0';
+      setTimeout(() => { try { rem.remove(); } catch(e){} }, 150);
+    }
+    requestAnimationFrame(() => el.classList.add('s'));
+  }
+
+  function setPct(pct, phase) {
+    if (fill)   fill.style.width = pct + '%';
+    if (pctLbl) pctLbl.textContent = Math.round(pct) + '%';
+    if (phase !== undefined && phLbl)
+      phLbl.textContent = PHASES[phase] || '';
+  }
+
+  function setFtr(txt) { if (ftrR) ftrR.textContent = txt; }
+
+  // 時計
+  const t0 = performance.now();
+  const clkIv = setInterval(() => {
+    if (!timeLbl) return;
+    const ms = performance.now() - t0;
     const s  = String(Math.floor(ms/1000)%60).padStart(2,'0');
     const m  = String(Math.floor(ms/60000)%60).padStart(2,'0');
     const h  = String(Math.floor(ms/3600000)).padStart(2,'0');
     timeLbl.textContent = h+':'+m+':'+s;
   }, 100);
 
-  // 1行追加
-  function addLine(type, text) {
-    const el = document.createElement('div');
-    el.className = 'bl ' + type;
-    el.textContent = text;
-    log.appendChild(el);
-    // 行数上限（最新14行）
-    while (log.children.length > 14) {
-      log.children[0].style.transition = 'opacity 0.1s';
-      log.children[0].style.opacity = '0';
-      const rem = log.children[0];
-      setTimeout(() => rem.remove(), 100);
-    }
-    requestAnimationFrame(() => el.classList.add('s'));
-  }
-
-  // プログレス更新
-  function setPct(pct, phase) {
-    fill.style.width = pct + '%';
-    pctLbl.textContent = Math.round(pct) + '%';
-    if (phase !== undefined) phLbl.textContent = PHASES[phase] || '';
-  }
-
-  // フッターテキスト変化
-  function setFtr(txt) { ftrR.textContent = txt; }
-
-  // 完了→フェードアウト
+  // 完了処理
   function finish() {
-    clearInterval(clk);
-    setTimeout(() => {
-      boot.classList.add('done');
-      boot.addEventListener('animationend', () => {
-        boot.style.display = 'none';
-      }, { once: true });
-    }, 300);
+    clearInterval(clkIv);
+    clearInterval(mainIv);
+    boot.classList.add('done');
+    const onEnd = () => { boot.style.display = 'none'; };
+    boot.addEventListener('animationend', onEnd, { once: true });
+    // animationendが発火しない環境へのフォールバック
+    setTimeout(onEnd, 600);
   }
 
-  // シーケンス定義 [delay_ms, lineIdx, pct, phaseIdx?, ftrTxt?]
-  const SEQ = [
-    [0,    0, 2],
-    [80,   1, 4],
-    [140,  2, 5],
-    [200,  3, 10, 0],
-    [320,  4, 14],
-    [420,  5, 18],
-    [520,  6, 22],
-    [640,  7, 27, 1],
-    [760,  8, 31],
-    [860,  9, 35, undefined, 'HELMETCAM: SEARCHING...'],
-    [980,  10, 38],
-    [1060, 11, 42, 2],
-    [1180, 12, 48],
-    [1300, 13, 54, 3],
-    [1420, 14, 59],
-    [1540, 15, 64],
-    [1660, 16, 69],
-    [1760, 17, 72],
-    [1840, 18, 76, 4],
-    [1960, 19, 82, undefined, 'HELMETCAM: OFFLINE'],
-    [2080, 20, 87],
-    [2160, 21, 90],
-    [2260, 22, 93],
-    [2360, 23, 97, 5],
-    [2540, 24, 100],
-  ];
+  // ── メインループ（setIntervalで50msごとにチェック）──
+  // setTimeout複数発行より安定してモバイルで動作する
+  let seqIdx = 0;
+  let done   = false;
+  const TOTAL_MS = 3200;
+  let mainIv;
 
-  SEQ.forEach(([delay, li, pct, phase, ftr]) => {
-    setTimeout(() => {
+  mainIv = setInterval(() => {
+    if (done) return;
+    const elapsed = performance.now() - t0;
+
+    // 経過時間に達したSEQエントリを全て処理
+    while (seqIdx < SEQ.length && elapsed >= SEQ[seqIdx][0]) {
+      const [, li, pct, phase, ftr] = SEQ[seqIdx];
       if (li < LINES.length) addLine(...LINES[li]);
       setPct(pct, phase);
       if (ftr !== undefined) setFtr(ftr);
-    }, delay);
-  });
+      seqIdx++;
+    }
 
-  // 完了
-  setTimeout(finish, 3000);
+    // 完了チェック
+    if (elapsed >= TOTAL_MS && !done) {
+      done = true;
+      finish();
+    }
+  }, 50);  // 50msポーリング = 20Hz（setTimeoutより確実）
 
 })();
 

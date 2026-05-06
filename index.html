@@ -1856,6 +1856,10 @@ updateCameraFromOrbit();
 function showVRTransition(callback) {
   const el = document.getElementById('vr-transition');
   const st = document.getElementById('vr-status');
+
+  // 要素が見つからない場合は即コールバック
+  if (!el || !st) { callback(); return; }
+
   const statuses = [
     'INITIALIZING STEREO OPTICS...',
     'SYNCHRONIZING GYROSCOPE...',
@@ -1863,8 +1867,15 @@ function showVRTransition(callback) {
     'ACTIVATING HELMET DISPLAY...',
     'VR MODE READY',
   ];
+
   let i = 0;
   el.classList.add('active');
+
+  const finish = () => {
+    el.classList.remove('active', 'done');
+    callback();
+  };
+
   const iv = setInterval(() => {
     i++;
     if (i < statuses.length) {
@@ -1874,9 +1885,11 @@ function showVRTransition(callback) {
       st.textContent = '>>> LAUNCH <<<';
       setTimeout(() => {
         el.classList.add('done');
+        // animationendのフォールバック（iOS Safariで発火しないケースに対応）
+        const fallback = setTimeout(finish, 600);
         el.addEventListener('animationend', () => {
-          el.classList.remove('active', 'done');
-          callback();
+          clearTimeout(fallback);
+          finish();
         }, { once: true });
       }, 200);
     }

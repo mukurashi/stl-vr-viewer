@@ -1785,10 +1785,9 @@ updateCameraFromOrbit();
     el.className = 'bl ' + type;
     el.textContent = text;
     log.appendChild(el);
+    // 古い行を同期的に削除（非同期だとwhileが無限ループする）
     while (log.children.length > 14) {
-      const rem = log.children[0];
-      rem.style.opacity = '0';
-      setTimeout(() => { try { rem.remove(); } catch(e){} }, 150);
+      log.children[0].remove();
     }
     requestAnimationFrame(() => el.classList.add('s'));
   }

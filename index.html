@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>STL VR Viewer</title>
+<title>STL VR Viewer - 6DOF (Gyro + Accel)</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
 
@@ -15,622 +15,116 @@
     --accent2:   #ff6b35;
     --text:      #c8dce8;
     --dim:       #4a6278;
-    --success:   #00ff88;
     --mono: 'Share Tech Mono', monospace;
     --sans: 'Rajdhani', sans-serif;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  html, body {
-    width: 100%; height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    overflow: hidden;
-  }
-
-  /* ── キャンバス ── */
-  #canvas {
-    display: block;
-    width: 100%; height: 100%;
-    position: fixed; inset: 0;
-    cursor: grab;
-  }
+  html, body { width: 100%; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); overflow: hidden; }
+  #canvas { display: block; width: 100%; height: 100%; position: fixed; inset: 0; cursor: grab; }
   #canvas:active { cursor: grabbing; }
-
-  /* ── VRモードのセンター分割線 ── */
-  #vr-divider {
-    display: none;
-    position: fixed;
-    left: 50%; top: 0;
-    width: 2px; height: 100%;
-    background: #000;
-    z-index: 10;
-    pointer-events: none;
-  }
+  #vr-divider { display: none; position: fixed; left: 50%; top: 0; width: 2px; height: 100%; background: #000; z-index: 10; pointer-events: none; }
   body.vr-mode #vr-divider { display: block; }
   body.vr-mode #canvas { cursor: none; }
-
-  /* ── UI パネル ── */
-  #ui {
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    z-index: 20;
-    pointer-events: none;
-  }
+  #ui { position: fixed; top: 0; left: 0; right: 0; z-index: 20; pointer-events: none; }
   body.vr-mode #ui { display: none; }
-
-  .topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    background: linear-gradient(to bottom, rgba(8,12,16,.95), transparent);
-    pointer-events: all;
-  }
-
-  .logo {
-    font-family: var(--mono);
-    font-size: 13px;
-    letter-spacing: 3px;
-    color: var(--accent);
-    text-transform: uppercase;
-  }
+  .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: linear-gradient(to bottom, rgba(8,12,16,.95), transparent); pointer-events: all; }
+  .logo { font-family: var(--mono); font-size: 13px; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; }
   .logo span { color: var(--dim); }
-
-  .controls {
-    display: flex; gap: 8px; align-items: center;
-  }
-
-  .btn {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 1px;
-    padding: 7px 14px;
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--dim);
-    cursor: pointer;
-    text-transform: uppercase;
-    transition: all .15s;
-    position: relative;
-    overflow: hidden;
-  }
-  .btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: var(--accent);
-    opacity: 0;
-    transition: opacity .15s;
-  }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .btn { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; padding: 7px 14px; background: transparent; border: 1px solid var(--border); color: var(--dim); cursor: pointer; text-transform: uppercase; transition: all .15s; position: relative; overflow: hidden; }
+  .btn::before { content: ''; position: absolute; inset: 0; background: var(--accent); opacity: 0; transition: opacity .15s; }
   .btn:hover { color: var(--accent); border-color: var(--accent); }
   .btn:hover::before { opacity: .05; }
   .btn.active { color: var(--accent2); border-color: var(--accent2); }
-
-  /* ── ドロップゾーン ── */
-  #dropzone {
-    position: fixed;
-    inset: 0;
-    z-index: 50;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg);
-    transition: opacity .3s;
-  }
+  #dropzone { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); transition: opacity .3s; }
   #dropzone.hidden { opacity: 0; pointer-events: none; }
-
-  .drop-box {
-    width: min(480px, 90vw);
-    border: 1px solid var(--border);
-    padding: 48px 40px;
-    text-align: center;
-    position: relative;
-    background: var(--surface);
-    transition: border-color .2s;
-  }
-  .drop-box::before, .drop-box::after {
-    content: '';
-    position: absolute;
-    width: 16px; height: 16px;
-    border-color: var(--accent);
-    border-style: solid;
-  }
+  .drop-box { width: min(480px, 90vw); border: 1px solid var(--border); padding: 48px 40px; text-align: center; position: relative; background: var(--surface); transition: border-color .2s; }
+  .drop-box::before, .drop-box::after { content: ''; position: absolute; width: 16px; height: 16px; border-color: var(--accent); border-style: solid; }
   .drop-box::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
   .drop-box::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
   .drop-box.dragover { border-color: var(--accent); }
-  .drop-box.dragover::before, .drop-box.dragover::after { animation: corner-pulse .5s infinite alternate; }
-
-  @keyframes corner-pulse {
-    to { opacity: .3; }
-  }
-
-  .drop-icon {
-    width: 56px; height: 56px;
-    margin: 0 auto 24px;
-    position: relative;
-  }
   .drop-icon svg { width: 100%; height: 100%; stroke: var(--accent); fill: none; }
-
-  .drop-title {
-    font-family: var(--mono);
-    font-size: 14px;
-    letter-spacing: 3px;
-    color: var(--accent);
-    text-transform: uppercase;
-    margin-bottom: 12px;
-  }
-  .drop-sub {
-    font-size: 14px;
-    color: var(--dim);
-    line-height: 1.6;
-    margin-bottom: 28px;
-  }
-
-  .file-btn {
-    font-family: var(--mono);
-    font-size: 12px;
-    letter-spacing: 2px;
-    padding: 10px 28px;
-    background: var(--accent);
-    color: var(--bg);
-    border: none;
-    cursor: pointer;
-    text-transform: uppercase;
-    transition: opacity .15s;
-  }
-  .file-btn:hover { opacity: .85; }
-
-  #file-input { display: none; }
-
-  /* ── ステータスバー ── */
-  #statusbar {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    z-index: 20;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 20px;
-    background: linear-gradient(to top, rgba(8,12,16,.95), transparent);
-    pointer-events: none;
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--dim);
-  }
+  .file-btn { font-family: var(--mono); font-size: 12px; letter-spacing: 2px; padding: 10px 28px; background: var(--accent); color: var(--bg); border: none; cursor: pointer; text-transform: uppercase; transition: opacity .15s; }
+  #statusbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; padding: 8px 20px; background: linear-gradient(to top, rgba(8,12,16,.95), transparent); pointer-events: none; font-family: var(--mono); font-size: 11px; color: var(--dim); }
   body.vr-mode #statusbar { display: none; }
-
-  #status-file { color: var(--accent); letter-spacing: 1px; }
-  #status-info { letter-spacing: .5px; }
-
-  /* ── VR終了ボタン ── */
-  #vr-exit {
-    display: none;
-    position: fixed;
-    bottom: 20px; left: 50%;
-    transform: translateX(-50%);
-    z-index: 30;
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 2px;
-    padding: 10px 24px;
-    background: rgba(255,107,53,.15);
-    border: 1px solid var(--accent2);
-    color: var(--accent2);
-    cursor: pointer;
-    text-transform: uppercase;
-  }
+  #vr-exit { display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 30; font-family: var(--mono); font-size: 11px; letter-spacing: 2px; padding: 10px 24px; background: rgba(255,107,53,.15); border: 1px solid var(--accent2); color: var(--accent2); cursor: pointer; text-transform: uppercase; }
   body.vr-mode #vr-exit { display: block; }
-
-  /* ── ローディング ── */
-  #loading {
-    display: none;
-    position: fixed;
-    inset: 0; z-index: 60;
-    background: rgba(8,12,16,.85);
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    gap: 16px;
-  }
+  #loading { display: none; position: fixed; inset: 0; z-index: 60; background: rgba(8,12,16,.85); align-items: center; justify-content: center; flex-direction: column; gap: 16px; }
   #loading.show { display: flex; }
-  .loading-bar {
-    width: 200px; height: 2px;
-    background: var(--border);
-    overflow: hidden;
-  }
-  .loading-bar-inner {
-    height: 100%;
-    background: var(--accent);
-    animation: loading-anim 1s ease-in-out infinite;
-  }
-  @keyframes loading-anim {
-    0%   { transform: translateX(-100%); }
-    100% { transform: translateX(200%); }
-  }
-  .loading-text {
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 3px;
-    color: var(--accent);
-    text-transform: uppercase;
-  }
-
-  /* ── VRモード：操作説明 ── */
-  #vr-hint {
-    display: none;
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 25;
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 2px;
-    color: rgba(0,229,255,.4);
-    text-align: center;
-    pointer-events: none;
-    animation: hint-fade 3s ease forwards;
-  }
+  .loading-bar { width: 200px; height: 2px; background: var(--border); overflow: hidden; }
+  .loading-bar-inner { height: 100%; background: var(--accent); animation: loading-anim 1s ease-in-out infinite; }
+  @keyframes loading-anim { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+  #vr-hint { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 25; font-family: var(--mono); font-size: 10px; letter-spacing: 2px; color: rgba(0,229,255,.4); text-align: center; pointer-events: none; animation: hint-fade 3s ease forwards; }
   body.vr-mode #vr-hint { display: block; }
-  @keyframes hint-fade {
-    0%   { opacity: 1; }
-    60%  { opacity: 1; }
-    100% { opacity: 0; }
-  }
+  @keyframes hint-fade { 0% { opacity: 1; } 60% { opacity: 1; } 100% { opacity: 0; } }
+  #scanline { position: fixed; inset: 0; z-index: 1; pointer-events: none; background: repeating-linear-gradient(to bottom, transparent, transparent 3px, rgba(0,0,0,.03) 3px, rgba(0,0,0,.03) 4px); }
 
-  /* ── スキャンライン演出 ── */
-  #scanline {
-    position: fixed; inset: 0;
-    z-index: 1;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      to bottom,
-      transparent,
-      transparent 3px,
-      rgba(0,0,0,.03) 3px,
-      rgba(0,0,0,.03) 4px
-    );
-  }
+  /* 起動シーケンス (パトレイバー風) */
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+  #boot { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; flex-direction: column; font-family: 'Share Tech Mono', monospace; color: #c85000; overflow: hidden; }
+  #boot.done { animation: boot-wipe 0.4s steps(1) forwards; }
+  @keyframes boot-wipe { 0% { clip-path: inset(0 0 0 0); } 25% { clip-path: inset(0 0 75% 0); } 50% { clip-path: inset(0 0 50% 0); } 75% { clip-path: inset(0 0 25% 0); } 100% { clip-path: inset(0 0 100% 0); opacity: 0; pointer-events: none; } }
+  #boot-hdr { border-bottom: 1px solid #c85000; padding: 10px 16px 8px; display: flex; justify-content: space-between; font-size: clamp(9px, 2vw, 12px); letter-spacing: 3px; text-transform: uppercase; }
+  #boot-log { flex: 1; padding: 12px 16px; overflow: hidden; display: flex; flex-direction: column; gap: 0px; }
+  .bl { font-size: clamp(9px, 1.8vw, 12px); letter-spacing: 1px; line-height: 1.65; white-space: pre; opacity: 0; color: #c85000; }
+  .bl.s { opacity: 1; }
+  .bl.ok   { color: #c85000; }
+  .bl.warn { color: #ff6a00; }
+  .bl.dim  { color: #5a2500; }
+  .bl.hi   { color: #ff8c00; }
+  #boot-bar-wrap { padding: 8px 16px; border-top: 1px solid #3a1500; }
+  #boot-bar-label { display: flex; justify-content: space-between; font-size: clamp(8px, 1.6vw, 10px); letter-spacing: 2px; color: #7a3000; margin-bottom: 5px; }
+  #boot-bar-track { height: 2px; background: #1a0800; position: relative; }
+  #boot-bar-fill { height: 100%; background: #c85000; width: 0%; transition: width 0.35s linear; }
+  #boot-bar-cursor { position: absolute; right: 0; top: -3px; width: 1px; height: 8px; background: #ff6a00; animation: cursor-blink 0.5s step-end infinite; }
+  @keyframes cursor-blink { 50% { opacity: 0; } }
+  #boot-ftr { border-top: 1px solid #3a1500; padding: 6px 16px; display: flex; justify-content: space-between; font-size: clamp(7px, 1.4vw, 9px); letter-spacing: 2px; color: #5a2500; }
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-
-/* ===== パトレイバー風起動シーケンス ===== */
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-
-#boot {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: #000;
-  display: flex;
-  flex-direction: column;
-  font-family: 'Share Tech Mono', 'Courier New', monospace;
-  color: #c85000;
-  overflow: hidden;
-  padding: 0;
-}
-#boot.done {
-  animation: boot-wipe 0.4s steps(1) forwards;
-}
-@keyframes boot-wipe {
-  0%   { clip-path: inset(0 0 0 0); }
-  25%  { clip-path: inset(0 0 75% 0); }
-  50%  { clip-path: inset(0 0 50% 0); }
-  75%  { clip-path: inset(0 0 25% 0); }
-  100% { clip-path: inset(0 0 100% 0); opacity: 0; pointer-events: none; }
-}
-
-/* ヘッダーライン */
-#boot-hdr {
-  border-bottom: 1px solid #c85000;
-  padding: 10px 16px 8px;
-  display: flex;
-  justify-content: space-between;
-  font-size: clamp(9px, 2vw, 12px);
-  letter-spacing: 3px;
-  text-transform: uppercase;
-  opacity: 0.9;
-}
-#boot-hdr-r { text-align: right; letter-spacing: 1px; color: #7a3000; }
-
-/* メインログエリア */
-#boot-log {
-  flex: 1;
-  padding: 12px 16px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 0px;
-}
-.bl {
-  font-size: clamp(9px, 1.8vw, 12px);
-  letter-spacing: 1px;
-  line-height: 1.65;
-  white-space: pre;
-  opacity: 0;
-  color: #c85000;
-}
-.bl.s { opacity: 1; }
-.bl.ok   { color: #c85000; }
-.bl.warn { color: #ff6a00; }
-.bl.dim  { color: #5a2500; }
-.bl.hi   { color: #ff8c00; }
-
-/* プログレスバー */
-#boot-bar-wrap {
-  padding: 8px 16px;
-  border-top: 1px solid #3a1500;
-}
-#boot-bar-label {
-  display: flex;
-  justify-content: space-between;
-  font-size: clamp(8px, 1.6vw, 10px);
-  letter-spacing: 2px;
-  color: #7a3000;
-  margin-bottom: 5px;
-}
-#boot-bar-track {
-  height: 2px;
-  background: #1a0800;
-  position: relative;
-}
-#boot-bar-fill {
-  height: 100%;
-  background: #c85000;
-  width: 0%;
-  transition: width 0.35s linear;
-}
-#boot-bar-cursor {
-  position: absolute;
-  right: 0; top: -3px;
-  width: 1px; height: 8px;
-  background: #ff6a00;
-  animation: cursor-blink 0.5s step-end infinite;
-}
-@keyframes cursor-blink { 50% { opacity: 0; } }
-
-/* フッター */
-#boot-ftr {
-  border-top: 1px solid #3a1500;
-  padding: 6px 16px;
-  display: flex;
-  justify-content: space-between;
-  font-size: clamp(7px, 1.4vw, 9px);
-  letter-spacing: 2px;
-  color: #5a2500;
-}
-
-/* ===== VR移行演出 ===== */
-#vr-transition {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 8888;
-  background: #000;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-family: 'Share Tech Mono', monospace;
-  color: #c85000;
-  font-size: clamp(10px, 2.5vw, 14px);
-  letter-spacing: 4px;
-}
-#vr-transition.active { display: flex; }
-#vr-scan-wrap {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-#vr-scan-line {
-  position: absolute;
-  left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(to right, transparent, #ff6a00 40%, #ff6a00 60%, transparent);
-  top: 0;
-  animation: scan-sweep 0.6s linear 3;
-  opacity: 0.7;
-}
-@keyframes scan-sweep {
-  from { top: 0; }
-  to   { top: 100%; }
-}
-#vr-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  z-index: 1;
-}
-#vr-eye-l, #vr-eye-r {
-  width: clamp(60px,12vw,90px);
-  height: clamp(40px,8vw,60px);
-  border: 2px solid #c85000;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-#vr-eye-l::before, #vr-eye-r::before {
-  content: '';
-  position: absolute;
-  inset: 6px;
-  border: 1px solid #7a3000;
-  animation: eye-pulse 0.4s ease-in-out infinite alternate;
-}
-@keyframes eye-pulse {
-  to { border-color: #ff6a00; box-shadow: inset 0 0 10px #ff6a0033; }
-}
-#vr-eyes {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-}
-#vr-sep {
-  width: 2px;
-  height: clamp(40px,8vw,60px);
-  background: #c85000;
-}
-#vr-label {
-  letter-spacing: 6px;
-  animation: label-flash 0.3s step-end 6;
-}
-@keyframes label-flash { 50% { opacity: 0; } }
-#vr-status {
-  font-size: clamp(8px, 1.8vw, 11px);
-  letter-spacing: 3px;
-  color: #7a3000;
-  height: 1.6em;
-}
-#vr-bar {
-  width: clamp(200px,40vw,320px);
-  height: 2px;
-  background: #1a0800;
-  overflow: hidden;
-}
-#vr-bar-fill {
-  height: 100%;
-  background: #c85000;
-  animation: vr-load 1.2s linear forwards;
-}
-@keyframes vr-load { from { width:0; } to { width:100%; } }
-#vr-transition.done {
-  animation: vr-split 0.5s ease-in forwards;
-}
-@keyframes vr-split {
-  0%   { clip-path: inset(0 0 0 0); }
-  50%  { clip-path: inset(40% 0 40% 0); }
-  100% { clip-path: inset(50% 0 50% 0); opacity:0; }
-}
-
+  /* VR移行演出 */
+  #vr-transition { display: none; position: fixed; inset: 0; z-index: 8888; background: #000; flex-direction: column; align-items: center; justify-content: center; font-family: 'Share Tech Mono', monospace; color: #c85000; }
+  #vr-transition.active { display: flex; }
+  #vr-scan-wrap { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #vr-scan-line { position: absolute; left: 0; right: 0; height: 2px; background: linear-gradient(to right, transparent, #ff6a00 40%, #ff6a00 60%, transparent); top: 0; animation: scan-sweep 0.6s linear 3; }
+  @keyframes scan-sweep { from { top: 0; } to { top: 100%; } }
+  #vr-center { display: flex; flex-direction: column; align-items: center; gap: 20px; z-index: 1; }
+  #vr-eyes { display: flex; gap: 20px; align-items: center; }
+  #vr-eye-l, #vr-eye-r { width: clamp(60px,12vw,90px); height: clamp(40px,8vw,60px); border: 2px solid #c85000; position: relative; }
+  #vr-eye-l::before, #vr-eye-r::before { content: ''; position: absolute; inset: 6px; border: 1px solid #7a3000; animation: eye-pulse 0.4s ease-in-out infinite alternate; }
+  @keyframes eye-pulse { to { border-color: #ff6a00; box-shadow: inset 0 0 10px #ff6a0033; } }
+  #vr-sep { width: 2px; height: clamp(40px,8vw,60px); background: #c85000; }
+  #vr-label { letter-spacing: 6px; animation: label-flash 0.3s step-end 6; }
+  @keyframes label-flash { 50% { opacity: 0; } }
+  #vr-status { font-size: clamp(8px, 1.8vw, 11px); letter-spacing: 3px; color: #7a3000; height: 1.6em; }
+  #vr-bar { width: clamp(200px,40vw,320px); height: 2px; background: #1a0800; overflow: hidden; }
+  #vr-bar-fill { height: 100%; background: #c85000; animation: vr-load 1.2s linear forwards; }
+  @keyframes vr-load { from { width:0; } to { width:100%; } }
 </style>
 </head>
 <body>
-
-<!-- ===== パトレイバー風起動シーケンス ===== -->
-<div id="boot">
-  <div id="boot-hdr">
-    <span>SV2 / SPECIAL VEHICLE SECTION 2 &nbsp;─ &nbsp;LABOR CONTROL UNIT</span>
-    <div id="boot-hdr-r">
-      <span id="boot-time">00:00:00</span>
-    </div>
-  </div>
-  <div id="boot-log"></div>
-  <div id="boot-bar-wrap">
-    <div id="boot-bar-label">
-      <span id="boot-phase-label">SYSTEM INIT</span>
-      <span id="boot-pct-label">0%</span>
-    </div>
-    <div id="boot-bar-track">
-      <div id="boot-bar-fill"></div>
-      <div id="boot-bar-cursor"></div>
-    </div>
-  </div>
-  <div id="boot-ftr">
-    <span>SHAFT: K9 &nbsp;/&nbsp; UNIT: AV-98 INGRAM</span>
-    <span id="boot-ftr-r">HELMETCAM: OFFLINE</span>
-  </div>
-</div>
-
-<!-- ===== VR移行演出 ===== -->
-<div id="vr-transition">
-  <div id="vr-scan-wrap"><div id="vr-scan-line"></div></div>
-  <div id="vr-center">
-    <div id="vr-label">ACTIVATING VR MODE</div>
-    <div id="vr-eyes">
-      <div id="vr-eye-l"></div>
-      <div id="vr-sep"></div>
-      <div id="vr-eye-r"></div>
-    </div>
-    <div id="vr-status">SYNCHRONIZING OPTICS...</div>
-    <div id="vr-bar"><div id="vr-bar-fill"></div></div>
-  </div>
-</div>
-
-
+<div id="boot"><div id="boot-hdr"><span>SV2 / SPECIAL VEHICLE SECTION 2 &nbsp;─ &nbsp;LABOR CONTROL UNIT</span><div id="boot-hdr-r"><span id="boot-time">00:00:00</span></div></div><div id="boot-log"></div><div id="boot-bar-wrap"><div id="boot-bar-label"><span id="boot-phase-label">SYSTEM INIT</span><span id="boot-pct-label">0%</span></div><div id="boot-bar-track"><div id="boot-bar-fill"></div><div id="boot-bar-cursor"></div></div></div><div id="boot-ftr"><span>SHAFT: K9 &nbsp;/&nbsp; UNIT: AV-98 INGRAM</span><span id="boot-ftr-r">HELMETCAM: OFFLINE</span></div></div>
+<div id="vr-transition"><div id="vr-scan-wrap"><div id="vr-scan-line"></div></div><div id="vr-center"><div id="vr-label">ACTIVATING VR MODE</div><div id="vr-eyes"><div id="vr-eye-l"></div><div id="vr-sep"></div><div id="vr-eye-r"></div></div><div id="vr-status">SYNCHRONIZING OPTICS...</div><div id="vr-bar"><div id="vr-bar-fill"></div></div></div></div>
 
 <canvas id="canvas"></canvas>
 <div id="vr-divider"></div>
 <div id="scanline"></div>
-
-<!-- UI -->
-<div id="ui">
-  <div class="topbar">
-    <div class="logo">STL<span>::</span>VR<span> /</span> Viewer</div>
-    <div class="controls">
-      <button class="btn" id="btn-reset" title="視点リセット">RESET</button>
-      <button class="btn" id="btn-wireframe">WIRE</button>
-      <button class="btn" id="btn-color">COLOR</button>
-      <button class="btn" id="btn-open">OPEN STL</button>
-      <button class="btn active" id="btn-vr">⬛ VR MODE</button>
-    </div>
-  </div>
-</div>
-
-<!-- ドロップゾーン -->
-<div id="dropzone" class="hidden">
-  <div class="drop-box" id="drop-box">
-    <div class="drop-icon">
-      <svg viewBox="0 0 24 24" stroke-width="1.2">
-        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-        <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
-      </svg>
-    </div>
-    <div class="drop-title">STL ファイルを開く</div>
-    <div class="drop-sub">
-      ここにファイルをドラッグ＆ドロップ<br>
-      または下のボタンから選択
-    </div>
-    <button class="file-btn" id="file-btn-open">ファイルを選択</button>
-    <input type="file" id="file-input" accept=".stl">
-  </div>
-</div>
-
-<!-- ローディング -->
-<div id="loading">
-  <div class="loading-text">LOADING STL</div>
-  <div class="loading-bar"><div class="loading-bar-inner"></div></div>
-</div>
-
-<!-- VR -->
-<div id="vr-hint">GYROSCOPE ACTIVE<br>スマートフォンを動かして視点を操作</div>
+<div id="ui"><div class="topbar"><div class="logo">STL<span>::</span>VR<span> /</span> Viewer</div><div class="controls"><button class="btn" id="btn-reset">RESET</button><button class="btn" id="btn-wireframe">WIRE</button><button class="btn" id="btn-color">COLOR</button><button class="btn" id="btn-open">OPEN STL</button><button class="btn active" id="btn-vr">⬛ VR MODE</button></div></div></div>
+<div id="dropzone" class="hidden"><div class="drop-box" id="drop-box"><div class="drop-icon"><svg viewBox="0 0 24 24" stroke-width="1.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div><div class="drop-title">STL ファイルを開く</div><div class="drop-sub">ここにファイルをドラッグ＆ドロップ<br>または下のボタンから選択</div><button class="file-btn" id="file-btn-open">ファイルを選択</button><input type="file" id="file-input" accept=".stl"></div></div>
+<div id="loading"><div class="loading-text">LOADING STL</div><div class="loading-bar"><div class="loading-bar-inner"></div></div></div>
+<div id="vr-hint">6DOF ACTIVE<br>スマホを動かして視点移動＋回転<br>ダブルタップで位置リセット</div>
 <button id="vr-exit">✕ EXIT VR</button>
-
-<!-- ステータスバー -->
-<div id="statusbar">
-  <span id="status-file">NO FILE LOADED</span>
-  <span id="status-info"></span>
-</div>
+<div id="statusbar"><span id="status-file">NO FILE LOADED</span><span id="status-info"></span></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ============================================================
-// STL Parser（ASCII / Binary 両対応）
+// STL Parser (ASCII / Binary)
 // ============================================================
 function parseSTL(buffer) {
-  // ASCII判定
   const text = new TextDecoder().decode(new Uint8Array(buffer, 0, 256));
-  if (text.trimStart().startsWith('solid') && text.includes('facet')) {
-    return parseASCII(new TextDecoder().decode(buffer));
-  }
+  if (text.trimStart().startsWith('solid') && text.includes('facet')) return parseASCII(new TextDecoder().decode(buffer));
   return parseBinary(buffer);
 }
-
 function parseBinary(buffer) {
   const view = new DataView(buffer);
   const nFaces = view.getUint32(80, true);
@@ -638,1296 +132,445 @@ function parseBinary(buffer) {
   const normals   = new Float32Array(nFaces * 9);
   let offset = 84;
   for (let i = 0; i < nFaces; i++) {
-    const nx = view.getFloat32(offset,     true);
-    const ny = view.getFloat32(offset + 4, true);
-    const nz = view.getFloat32(offset + 8, true);
+    const nx = view.getFloat32(offset, true), ny = view.getFloat32(offset+4, true), nz = view.getFloat32(offset+8, true);
     offset += 12;
     for (let v = 0; v < 3; v++) {
-      const base = i * 9 + v * 3;
-      positions[base]     = view.getFloat32(offset,     true);
-      positions[base + 1] = view.getFloat32(offset + 4, true);
-      positions[base + 2] = view.getFloat32(offset + 8, true);
-      normals[base]     = nx;
-      normals[base + 1] = ny;
-      normals[base + 2] = nz;
+      const base = i*9 + v*3;
+      positions[base] = view.getFloat32(offset, true); positions[base+1] = view.getFloat32(offset+4, true); positions[base+2] = view.getFloat32(offset+8, true);
+      normals[base] = nx; normals[base+1] = ny; normals[base+2] = nz;
       offset += 12;
     }
-    offset += 2; // attribute
+    offset += 2;
   }
   return { positions, normals, faceCount: nFaces };
 }
-
 function parseASCII(text) {
   const posArr = [], normArr = [];
   const lines = text.split('\n');
-  let nx = 0, ny = 0, nz = 0;
+  let nx=0, ny=0, nz=0;
   for (const line of lines) {
     const t = line.trim();
-    if (t.startsWith('facet normal')) {
-      const p = t.split(/\s+/);
-      nx = parseFloat(p[2]); ny = parseFloat(p[3]); nz = parseFloat(p[4]);
-    } else if (t.startsWith('vertex')) {
-      const p = t.split(/\s+/);
-      posArr.push(parseFloat(p[1]), parseFloat(p[2]), parseFloat(p[3]));
-      normArr.push(nx, ny, nz);
-    }
+    if (t.startsWith('facet normal')) { const p = t.split(/\s+/); nx=parseFloat(p[2]); ny=parseFloat(p[3]); nz=parseFloat(p[4]); }
+    else if (t.startsWith('vertex')) { const p = t.split(/\s+/); posArr.push(parseFloat(p[1]), parseFloat(p[2]), parseFloat(p[3])); normArr.push(nx, ny, nz); }
   }
-  return {
-    positions: new Float32Array(posArr),
-    normals:   new Float32Array(normArr),
-    faceCount: posArr.length / 9
-  };
+  return { positions: new Float32Array(posArr), normals: new Float32Array(normArr), faceCount: posArr.length/9 };
 }
 
 // ============================================================
 // Three.js セットアップ
 // ============================================================
-const canvas   = document.getElementById('canvas');
+const canvas = document.getElementById('canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.shadowMap.enabled = true;
 renderer.setClearColor(0x080c10);
-
 const scene = new THREE.Scene();
-scene.fog   = new THREE.FogExp2(0x080c10, 0.015);
-
-// カメラ（通常モード）
+scene.fog = new THREE.FogExp2(0x080c10, 0.015);
 const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
 camera.position.set(0, 1.5, 4);
-
-// VR用カメラ（左右）
 const camL = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
 const camR = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
-const IPD  = 0.064; // 瞳孔間距離
-
-// ライティング
+const IPD = 0.064;
 const ambientLight = new THREE.AmbientLight(0x1a2e44, 1.2);
 scene.add(ambientLight);
+const dirLight1 = new THREE.DirectionalLight(0x00e5ff, 1.0); dirLight1.position.set(5,8,5); scene.add(dirLight1);
+const dirLight2 = new THREE.DirectionalLight(0xff6b35, 0.4); dirLight2.position.set(-5,-3,-5); scene.add(dirLight2);
+const grid = new THREE.GridHelper(20, 40, 0x1a2e44, 0x0d1520); scene.add(grid);
 
-const dirLight1 = new THREE.DirectionalLight(0x00e5ff, 1.0);
-dirLight1.position.set(5, 8, 5);
-scene.add(dirLight1);
-
-const dirLight2 = new THREE.DirectionalLight(0xff6b35, 0.4);
-dirLight2.position.set(-5, -3, -5);
-scene.add(dirLight2);
-
-// グリッド
-const grid = new THREE.GridHelper(20, 40, 0x1a2e44, 0x0d1520);
-scene.add(grid);
-
-// ============================================================
-// マテリアル
-// ============================================================
-const solidMat = new THREE.MeshPhongMaterial({
-  vertexColors: true,
-  shininess: 40,
-  specular: new THREE.Color(0x223344)
-});
-const wireMat = new THREE.MeshBasicMaterial({
-  color: 0x00e5ff,
-  wireframe: true,
-  opacity: 0.6,
-  transparent: true
-});
-
-let currentMode = 'color'; // 'color' | 'wire' | 'solid'
-
-// ============================================================
-// STLロード
-// ============================================================
+const solidMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 40, specular: new THREE.Color(0x223344) });
+const wireMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true, opacity: 0.6, transparent: true });
+let currentMode = 'color';
 let meshGroup = null;
 let modelInfo = { vertices: 0, faces: 0, size: '' };
+
+function applyElevationColor(geo) {
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  let zMin = Infinity, zMax = -Infinity;
+  for (let i = 0; i < pos.count; i++) { const z = pos.getY(i); if (z < zMin) zMin = z; if (z > zMax) zMax = z; }
+  const zRange = Math.max(zMax - zMin, 1e-6);
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) - zMin) / zRange;
+    let r,g,b;
+    if (t < 0.5) { const v = t*2; r = v; g = 0.78 + v*0.22; b = 0; }
+    else { const v = (t-0.5)*2; r = 1.0; g = 1.0 - v; b = 0; }
+    colors[i*3] = r; colors[i*3+1] = g; colors[i*3+2] = b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
 
 function loadSTLBuffer(buffer, filename) {
   document.getElementById('loading').classList.add('show');
   setTimeout(() => {
     try {
       const { positions, normals, faceCount } = parseSTL(buffer);
-
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      geo.setAttribute('normal',   new THREE.BufferAttribute(normals,   3));
-
-      // 標高ベース色付け（Z軸：低=緑 / 中=黄 / 高=赤）
+      geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
       applyElevationColor(geo);
-
-      // 中心・スケール正規化
       geo.computeBoundingBox();
-      const box  = geo.boundingBox;
-      const size = new THREE.Vector3();
-      box.getSize(size);
+      const box = geo.boundingBox, size = new THREE.Vector3(); box.getSize(size);
       const maxDim = Math.max(size.x, size.y, size.z);
-      const scale  = 2.0 / maxDim;
-      const center = new THREE.Vector3();
-      box.getCenter(center);
-
-      // メッシュ作成
+      const scale = 2.0 / maxDim;
+      const center = new THREE.Vector3(); box.getCenter(center);
       if (meshGroup) scene.remove(meshGroup);
       meshGroup = new THREE.Group();
-
       const solidMesh = new THREE.Mesh(geo, solidMat.clone());
       solidMesh.scale.setScalar(scale);
       solidMesh.position.copy(center.clone().negate().multiplyScalar(scale));
       solidMesh.castShadow = true;
       solidMesh.name = 'solid';
-
-      const wireGeo   = geo.clone();
-      const wireMesh  = new THREE.Mesh(wireGeo, wireMat.clone());
+      const wireGeo = geo.clone();
+      const wireMesh = new THREE.Mesh(wireGeo, wireMat.clone());
       wireMesh.scale.setScalar(scale);
       wireMesh.position.copy(center.clone().negate().multiplyScalar(scale));
       wireMesh.name = 'wire';
       wireMesh.visible = false;
-
       meshGroup.add(solidMesh, wireMesh);
       scene.add(meshGroup);
-
-      // グリッドをモデル下部に合わせる
       const newBox = new THREE.Box3().setFromObject(meshGroup);
-      const newSize = new THREE.Vector3();
-      newBox.getSize(newSize);
+      const newSize = new THREE.Vector3(); newBox.getSize(newSize);
       grid.position.y = newBox.min.y - 0.01;
-
-      // カメラ位置リセット
-      const dist = newSize.length() * 1.4;
-      orbitState.radius   = dist;
-      orbitState.theta    = 0.5;
-      orbitState.phi      = Math.PI / 3;
-      orbitState.target.set(0, 0, 0);
+      orbitState.radius = newSize.length() * 1.2;
+      orbitState.target.set(0,0,0);
       updateCameraFromOrbit();
-
-      modelInfo.vertices = faceCount * 3;
-      modelInfo.faces    = faceCount;
-      modelInfo.size     = `${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)}`;
-
+      modelInfo = { vertices: faceCount*3, faces: faceCount, size: `${size.x.toFixed(1)}×${size.y.toFixed(1)}×${size.z.toFixed(1)}` };
       document.getElementById('status-file').textContent = filename.toUpperCase();
-      document.getElementById('status-info').textContent =
-        `FACES: ${faceCount.toLocaleString()}  VERTS: ${modelInfo.vertices.toLocaleString()}  SIZE: ${modelInfo.size}`;
-
+      document.getElementById('status-info').textContent = `FACES: ${faceCount.toLocaleString()}  VERTS: ${modelInfo.vertices.toLocaleString()}  SIZE: ${modelInfo.size}`;
       applyDisplayMode(currentMode);
       document.getElementById('dropzone').classList.add('hidden');
-    } catch(e) {
-      alert('STL読み込みエラー: ' + e.message);
-      console.error(e);
-    }
+    } catch(e) { alert('STL読み込みエラー: '+e.message); console.error(e); }
     document.getElementById('loading').classList.remove('show');
   }, 50);
 }
-
-function applyElevationColor(geo) {
-  const pos = geo.attributes.position;
-  const colors = new Float32Array(pos.count * 3);
-
-  // Z の min/max を求める
-  let zMin = Infinity, zMax = -Infinity;
-  for (let i = 0; i < pos.count; i++) {
-    const z = pos.getY(i);  // Three.js では Y が上
-    if (z < zMin) zMin = z;
-    if (z > zMax) zMax = z;
-  }
-  const zRange = Math.max(zMax - zMin, 1e-6);
-
-  for (let i = 0; i < pos.count; i++) {
-    const t = (pos.getY(i) - zMin) / zRange; // 0〜1
-    let r, g, b;
-    if (t < 0.5) {
-      const v = t * 2;
-      r = v;
-      g = 0.78 + v * 0.22;
-      b = 0;
-    } else {
-      const v = (t - 0.5) * 2;
-      r = 1.0;
-      g = 1.0 - v;
-      b = 0;
-    }
-    colors[i * 3]     = r;
-    colors[i * 3 + 1] = g;
-    colors[i * 3 + 2] = b;
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-}
-
 function applyDisplayMode(mode) {
   currentMode = mode;
   if (!meshGroup) return;
-  const solid = meshGroup.getObjectByName('solid');
-  const wire  = meshGroup.getObjectByName('wire');
+  const solid = meshGroup.getObjectByName('solid'), wire = meshGroup.getObjectByName('wire');
   if (!solid || !wire) return;
-
-  if (mode === 'wire') {
-    solid.visible = false;
-    wire.visible  = true;
-  } else if (mode === 'color') {
-    solid.visible = true;
-    wire.visible  = false;
-    solid.material.vertexColors = true;
-    solid.material.color.set(0xffffff);
-    solid.material.needsUpdate = true;
-  } else {
-    solid.visible = true;
-    wire.visible  = false;
-    solid.material.vertexColors = false;
-    solid.material.color.set(0x00e5ff);
-    solid.material.needsUpdate = true;
-  }
+  if (mode === 'wire') { solid.visible = false; wire.visible = true; }
+  else if (mode === 'color') { solid.visible = true; wire.visible = false; solid.material.vertexColors = true; solid.material.color.set(0xffffff); solid.material.needsUpdate = true; }
+  else { solid.visible = true; wire.visible = false; solid.material.vertexColors = false; solid.material.color.set(0x00e5ff); solid.material.needsUpdate = true; }
 }
 
-// ============================================================
-// オービットコントロール（独自実装）
-// ============================================================
-const orbitState = {
-  theta:  0.5,
-  phi:    Math.PI / 3,
-  radius: 5,
-  target: new THREE.Vector3(0, 0, 0),
-  isDragging: false,
-  lastX: 0, lastY: 0,
-};
-
+// オービットコントロール（通常モード用）
+const orbitState = { theta: 0.5, phi: Math.PI/3, radius: 5, target: new THREE.Vector3(0,0,0), isDragging: false, lastX:0, lastY:0 };
 function updateCameraFromOrbit() {
   const s = orbitState;
   const x = s.radius * Math.sin(s.phi) * Math.sin(s.theta);
   const y = s.radius * Math.cos(s.phi);
   const z = s.radius * Math.sin(s.phi) * Math.cos(s.theta);
-  camera.position.set(
-    s.target.x + x,
-    s.target.y + y,
-    s.target.z + z
-  );
+  camera.position.set(s.target.x + x, s.target.y + y, s.target.z + z);
   camera.lookAt(s.target);
 }
-
-canvas.addEventListener('mousedown', e => {
-  orbitState.isDragging = true;
-  orbitState.lastX = e.clientX;
-  orbitState.lastY = e.clientY;
-});
-canvas.addEventListener('mouseup',   () => { orbitState.isDragging = false; });
-canvas.addEventListener('mousemove', e => {
-  if (!orbitState.isDragging || vrMode) return;
-  const dx = e.clientX - orbitState.lastX;
-  const dy = e.clientY - orbitState.lastY;
-  orbitState.theta -= dx * 0.005;
-  orbitState.phi    = Math.max(0.05, Math.min(Math.PI - 0.05, orbitState.phi + dy * 0.005));
-  orbitState.lastX  = e.clientX;
-  orbitState.lastY  = e.clientY;
-  updateCameraFromOrbit();
-});
-canvas.addEventListener('wheel', e => {
-  if (vrMode) return;
-  e.preventDefault();
-  orbitState.radius = Math.max(0.5, Math.min(50, orbitState.radius + e.deltaY * 0.01));
-  updateCameraFromOrbit();
-}, { passive: false });
-
-// タッチ操作
-let lastTouchDist = null;
-canvas.addEventListener('touchstart', e => {
-  if (e.touches.length === 1) {
-    orbitState.isDragging = true;
-    orbitState.lastX = e.touches[0].clientX;
-    orbitState.lastY = e.touches[0].clientY;
-  }
-  if (e.touches.length === 2) {
-    lastTouchDist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
-  }
-});
-canvas.addEventListener('touchend',   () => { orbitState.isDragging = false; });
-canvas.addEventListener('touchmove',  e => {
-  e.preventDefault();
-  if (e.touches.length === 1 && !vrMode) {
-    // 通常モード：オービット回転
-    const dx = e.touches[0].clientX - orbitState.lastX;
-    const dy = e.touches[0].clientY - orbitState.lastY;
-    orbitState.theta -= dx * 0.005;
-    orbitState.phi    = Math.max(0.05, Math.min(Math.PI - 0.05, orbitState.phi + dy * 0.005));
-    orbitState.lastX  = e.touches[0].clientX;
-    orbitState.lastY  = e.touches[0].clientY;
-    updateCameraFromOrbit();
-  }
-  if (e.touches.length === 2 && lastTouchDist !== null) {
-    const d = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
-    orbitState.radius = Math.max(0.5, Math.min(50, orbitState.radius * (lastTouchDist / d)));
-    lastTouchDist = d;
-    updateCameraFromOrbit();
-  }
-}, { passive: false });
+canvas.addEventListener('mousedown', e => { orbitState.isDragging = true; orbitState.lastX = e.clientX; orbitState.lastY = e.clientY; });
+canvas.addEventListener('mouseup', () => { orbitState.isDragging = false; });
+canvas.addEventListener('mousemove', e => { if(!orbitState.isDragging || vrMode) return; const dx = e.clientX - orbitState.lastX, dy = e.clientY - orbitState.lastY; orbitState.theta -= dx*0.005; orbitState.phi = Math.max(0.05, Math.min(Math.PI-0.05, orbitState.phi + dy*0.005)); orbitState.lastX = e.clientX; orbitState.lastY = e.clientY; updateCameraFromOrbit(); });
+canvas.addEventListener('wheel', e => { if(vrMode) return; e.preventDefault(); orbitState.radius = Math.max(0.5, Math.min(50, orbitState.radius + e.deltaY*0.01)); updateCameraFromOrbit(); }, { passive: false });
 
 // ============================================================
-// VR モード（ジャイロ + サイドバイサイドステレオ）
+// VR 6DOF : ジャイロ(回転) + 加速度(移動)
 // ============================================================
 let vrMode = false;
-let gyroEuler   = { alpha: 0, beta: 0, gamma: 0 };
-let vrQuat      = new THREE.Quaternion();
-let vrBaseQuat  = null;
-let vrAbsQuat   = new THREE.Quaternion();
-// DeviceOrientationの生角度（重力計算に使用）
-let _rawBeta  = 0;  // 前後傾き（度）
-let _rawGamma = 0;  // 左右傾き（度）
+let gyroQuat = new THREE.Quaternion();      // 絶対姿勢
+let vrBaseQuat = null;                     // 基準姿勢
+let vrAbsQuat = new THREE.Quaternion();
 
-// ============================================================
-// 球面周回カメラ方式（Orbital VR）
-// ────────────────────────────────────────────────────
-// 加速度センサーの2重積分は現実的に使えない（ドリフト爆発）。
-// 代わりにジャイロの絶対姿勢からカメラ位置を球面上で計算する。
-//
-//   カメラ位置 = オブジェクト中心 + vrAbsQuat * (0, 0, orbitRadius)
-//
-// スマホを左に向ける → カメラが右に移動 → 左側から見る
-// スマホを上に向ける → カメラが下に移動 → 上から見る
-// これにより「その場にオブジェクトがある」感覚が生まれる。
-// ============================================================
+// 移動関連（加速度積分）
+let accelVelocity = new THREE.Vector3(0,0,0);
+let accelPosition = new THREE.Vector3(0,0,0);   // オブジェクト中心からのオフセット
+let lastTimestamp = 0;
+let accelRaw = new THREE.Vector3(0,0,0);
+let hasAccel = false;
+let calibDone = false;
 
-const orbital = {
-  // ── カメラ位置（ワールド座標・直接操作）──
-  // オブジェクト中心を原点としたカメラの3D位置オフセット
-  // 初期値はZ方向（正面）に3m
-  camPos:       new THREE.Vector3(0, 0, 3.0),
-  // センサー積分速度
-  vel:          new THREE.Vector3(),
-  // ── センサー関連 ──
-  rawAccel:     new THREE.Vector3(),
-  hasClean:     false,
-  calibDone:    false,
-  // ── パラメータ ──
-  MIN_DIST:     0.3,    // オブジェクトに近づける最小距離
-  MAX_DIST:     12.0,   // 最大距離
-  THRESHOLD:    0.20,   // ノイズゲート（m/s²）
-  VEL_DAMP:     5.0,    // 速度減衰（/秒）
-  MOVE_SCALE:   0.5,    // 移動スケール
-};
+// パラメータ
+const ACCEL_GAIN = 0.8;      // 加速度→速度変換ゲイン
+const VEL_DAMP = 4.5;        // 速度減衰 (1/秒)
+const MAX_SPEED = 1.8;       // 最大移動速度
+const MIN_DIST = 0.2;        // 中心からの最小距離
+const MAX_DIST = 8.0;        // 最大距離
 
-// ── VRモード中のタッチ操作（前後移動・横移動） ──────────
-// 画面左半分: 前後（縦スワイプ）・横（横スワイプ）移動
-// 画面右半分: 同様
-const vrTouch = {
-  active:  false,
-  startX:  0,
-  startY:  0,
-  lastX:   0,
-  lastY:   0,
-};
-
-function initVRTouch() {
-  const cvs = document.getElementById('canvas');
-
-  cvs.addEventListener('touchstart', e => {
-    if (!vrMode) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    vrTouch.active = true;
-    vrTouch.startX = vrTouch.lastX = t.clientX;
-    vrTouch.startY = vrTouch.lastY = t.clientY;
-  }, { passive: false });
-
-  cvs.addEventListener('touchmove', e => {
-    if (!vrMode || !vrTouch.active) return;
-    e.preventDefault();
-    const t = e.touches[0];
-    const dx = t.clientX - vrTouch.lastX;
-    const dy = t.clientY - vrTouch.lastY;
-    vrTouch.lastX = t.clientX;
-    vrTouch.lastY = t.clientY;
-
-    // 縦スワイプ → カメラをオブジェクトに近づく/遠ざかる方向に移動
-    const toObj = orbital.camPos.clone().negate().normalize();
-    orbital.camPos.addScaledVector(toObj, dy * 0.02);
-    // 距離クランプ
-    const d = orbital.camPos.length();
-    if (d < orbital.MIN_DIST) orbital.camPos.setLength(orbital.MIN_DIST);
-    if (d > orbital.MAX_DIST) orbital.camPos.setLength(orbital.MAX_DIST);
-
-    // 横スワイプ → camPosを水平方向に回転（オービット）
-    const angH = -dx * 0.008;
-    const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), angH);
-    orbital.camPos.applyQuaternion(qY);
-
-  }, { passive: false });
-
-  cvs.addEventListener('touchend', e => {
-    if (!vrMode) return;
-    vrTouch.active = false;
-  });
-}
-
-// ── 加速度センサーイベント ──
-
-
-
-
-
-
-// ── 加速度を積分してorbital.radius/offsetを更新 ──
-
-
-// ===== モーション（加速度センサー）=====
 function onMotion(e) {
   if (!vrMode) return;
-  const aC = e.acceleration;
-  const aR = e.accelerationIncludingGravity;
-  if (aC && aC.x !== null &&
-      (Math.abs(aC.x) + Math.abs(aC.y) + Math.abs(aC.z)) > 0.001) {
-    orbital.hasClean  = true;
-    orbital.calibDone = true;
-    orbital.rawAccel.set(aC.x || 0, aC.y || 0, aC.z || 0);
-  } else if (aR && aR.x !== null) {
-    orbital.rawAccel.set(aR.x || 0, aR.y || 0, aR.z || 0);
-    orbital.calibDone = true;
-  }
-}
-
-function startMotion() {
-  orbital.vel.set(0, 0, 0);
-  orbital.calibDone = false;
-  orbital.hasClean  = false;
-  // カメラ初期位置：現在のorbitStateの距離を引き継ぐ
-  const initDist = orbitState.radius || 3.0;
-  orbital.camPos.set(0, 0, initDist);
-  const doStart = () => {
-    window.addEventListener('devicemotion', onMotion, true);
-  };
-  if (typeof DeviceMotionEvent !== 'undefined' &&
-      typeof DeviceMotionEvent.requestPermission === 'function') {
-    DeviceMotionEvent.requestPermission()
-      .then(s => { if (s === 'granted') doStart(); })
-      .catch(() => doStart());
-  } else {
-    doStart();
-  }
-}
-
-function stopMotion() {
-  orbital.vel.set(0, 0, 0);
-  window.removeEventListener('devicemotion', onMotion, true);
-}
-
-function updateMotion(dt) {
-  if (!vrMode || !orbital.calibDone) return;
-
-  // ── 1. 重力除去済み加速度をデバイス座標系で取得 ──
-  let mx, my, mz;
-  if (orbital.hasClean) {
-    // Android: e.accelerationが重力除去済み
-    mx = orbital.rawAccel.x;
-    my = orbital.rawAccel.y;
-    mz = orbital.rawAccel.z;
-  } else {
-    // iOS: オイラー角から重力ベクトルを計算して差し引く（W3C準拠）
-    const bR = _rawBeta  * Math.PI / 180;
-    const gR = _rawGamma * Math.PI / 180;
-    const gX = -Math.sin(gR)                * 9.81;
-    const gY =  Math.sin(bR) * Math.cos(gR) * 9.81;
-    const gZ = -Math.cos(bR) * Math.cos(gR) * 9.81;
-    mx = orbital.rawAccel.x - gX;
-    my = orbital.rawAccel.y - gY;
-    mz = orbital.rawAccel.z - gZ;
-  }
-
-  // ── 2. ノイズゲート ──
-  const mag = Math.sqrt(mx*mx + my*my + mz*mz);
-  if (mag < orbital.THRESHOLD) {
-    orbital.vel.multiplyScalar(Math.exp(-orbital.VEL_DAMP * 4 * dt));
+  let ax, ay, az;
+  if (e.acceleration && e.acceleration.x !== null) {
+    ax = e.acceleration.x; ay = e.acceleration.y; az = e.acceleration.z;
+    hasAccel = true;
+  } else if (e.accelerationIncludingGravity) {
+    ax = e.accelerationIncludingGravity.x;
+    ay = e.accelerationIncludingGravity.y;
+    az = e.accelerationIncludingGravity.z;
+    hasAccel = true;
+  } else return;
+  // 簡易ハイパスフィルタ（重力成分を除去）
+  if (!calibDone) {
+    calibDone = true;
     return;
   }
-
-  // ── 3. 画面向きに合わせてデバイス軸をリマップ ──
-  const orientDeg = (screen.orientation && screen.orientation.angle != null)
-    ? screen.orientation.angle : (window.orientation || 0);
-  let ax, ay, az;  // ax=右, ay=上, az=スマホ背面方向（前進=負）
-  if (Math.abs(orientDeg - 90) < 45) {
-    ax = -my; ay = -mz; az = -mx;   // 右横持ち
-  } else if (Math.abs(orientDeg - 270) < 45 || Math.abs(orientDeg + 90) < 45) {
-    ax =  my; ay = -mz; az =  mx;   // 左横持ち
-  } else {
-    ax =  mx; ay = -my; az =  mz;   // 縦持ち
-  }
-
-  // ── 4. デバイス座標 → ワールド座標に変換 ──
-  // vrAbsQuat はジャイロの絶対姿勢。これをかけることで
-  // 「スマホが向いている方向」の右・上・前がワールド座標になる
-  const worldRight   = new THREE.Vector3(1, 0, 0).applyQuaternion(vrAbsQuat);
-  const worldUp      = new THREE.Vector3(0, 1, 0).applyQuaternion(vrAbsQuat);
-  const worldForward = new THREE.Vector3(0, 0,-1).applyQuaternion(vrAbsQuat);
-
-  // ── 5. ワールド空間で加速度ベクトルを合成 ──
-  const accelWorld = new THREE.Vector3()
-    .addScaledVector(worldRight,    ax)
-    .addScaledVector(worldUp,       ay)
-    .addScaledVector(worldForward, -az);  // az正=前進→camPos縮小方向
-
-  // ── 6. 速度積分 ──
-  orbital.vel.addScaledVector(accelWorld, dt * orbital.MOVE_SCALE);
-  orbital.vel.multiplyScalar(Math.exp(-orbital.VEL_DAMP * dt));
-
-  // ── 7. カメラ位置に速度を加算 ──
-  orbital.camPos.add(orbital.vel.clone().multiplyScalar(dt));
-
-  // ── 8. オブジェクト中心からの距離をクランプ ──
-  const dist = orbital.camPos.length();
-  if (dist < orbital.MIN_DIST) orbital.camPos.setLength(orbital.MIN_DIST);
-  if (dist > orbital.MAX_DIST) orbital.camPos.setLength(orbital.MAX_DIST);
+  accelRaw.set(ax, ay, az);
 }
 
-// ===== モーション（加速度センサー）=====
-
-
-
-
-
-
-
-
-function enterVR() {
-  if (!meshGroup) {
-    alert('先にSTLファイルを読み込んでください');
-    return;
-  }
-
-  // ── 1. VR演出オーバーレイを表示（装飾のみ・処理は独立） ──
-  const vtEl = document.getElementById('vr-transition');
-  const vtSt = document.getElementById('vr-status');
-  const VR_DELAY = 1500; // 演出時間(ms)
-
-  if (vtEl && vtSt) {
-    vtEl.classList.add('active');
-    const msgs = [
-      'SYNCHRONIZING GYROSCOPE...',
-      'CALIBRATING STEREO OPTICS...',
-      'VR MODE READY',
-    ];
-    let mi = 0;
-    const iv = setInterval(() => {
-      mi++;
-      if (mi < msgs.length) {
-        vtSt.textContent = msgs[mi];
-      } else {
-        clearInterval(iv);
-        vtSt.textContent = '>>> LAUNCH <<<';
-      }
-    }, VR_DELAY / msgs.length);
-
-    // 演出が終わったら必ず隠す
-    setTimeout(() => {
-      vtEl.classList.remove('active', 'done');
-      clearInterval(iv);
-    }, VR_DELAY + 200);
-  }
-
-  // ── 2. VR処理は演出と並行して実行（演出完了を待たない） ──
-  setTimeout(() => {
-    vrMode = true;
-    vrBaseQuat = null;
-    document.body.classList.add('vr-mode');
-    hideOverlay();
-
-    // キャンバスサイズをウィンドウに合わせる
-    const vvp = window.visualViewport || window;
-    renderer.setSize(
-      Math.floor(vvp.width  || window.innerWidth),
-      Math.floor(vvp.height || window.innerHeight)
-    );
-
-    // 周回半径をメッシュサイズから決定
-    if (meshGroup) {
-      const box = new THREE.Box3().setFromObject(meshGroup);
-      const sz  = new THREE.Vector3();
-      box.getSize(sz);
-      const r = sz.length() * 1.1;
-      orbital.camPos.set(0, 0, r);
-      orbital.vel.set(0, 0, 0);
-    }
-
-    // ジャイロ・センサー開始（iOS許可リクエスト込み）
-    if (typeof DeviceOrientationEvent !== 'undefined' &&
-        typeof DeviceOrientationEvent.requestPermission === 'function') {
-      DeviceOrientationEvent.requestPermission()
-        .then(state => { if (state === 'granted') initGyro(); })
-        .catch(() => initGyro());
-    } else {
-      initGyro();
-    }
-
-    // フルスクリーン
-    if (document.documentElement.requestFullscreen) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    }
-  }, VR_DELAY); // 演出と同じタイミングでVR開始
+function updateAccelMovement(dt) {
+  if (!vrMode || !hasAccel) return;
+  // 画面の向きを考慮して加速度軸を変換
+  const orientDeg = (screen.orientation && screen.orientation.angle != null) ? screen.orientation.angle : (window.orientation || 0);
+  let lx = accelRaw.x, ly = accelRaw.y, lz = accelRaw.z;
+  if (Math.abs(orientDeg) === 90) { let tmp = lx; lx = -ly; ly = tmp; }
+  else if (Math.abs(orientDeg) === 270) { let tmp = lx; lx = ly; ly = -tmp; }
+  // デバイス座標→ワールド座標（ジャイロ姿勢 vrAbsQuat で回転）
+  const localAcc = new THREE.Vector3(lx, ly, lz);
+  const worldAcc = localAcc.clone().applyQuaternion(vrAbsQuat);
+  // 移動速度に変換（XY成分は横移動、Zは前後）
+  accelVelocity.x += worldAcc.x * ACCEL_GAIN * dt;
+  accelVelocity.y += worldAcc.y * ACCEL_GAIN * dt;
+  accelVelocity.z += worldAcc.z * ACCEL_GAIN * dt;
+  // 速度制限
+  if (accelVelocity.length() > MAX_SPEED) accelVelocity.setLength(MAX_SPEED);
+  // 減衰
+  accelVelocity.multiplyScalar(Math.exp(-VEL_DAMP * dt));
+  // 位置更新
+  accelPosition.add(accelVelocity.clone().multiplyScalar(dt));
+  // 距離制限
+  const dist = accelPosition.length();
+  if (dist < MIN_DIST) accelPosition.setLength(MIN_DIST);
+  if (dist > MAX_DIST) accelPosition.setLength(MAX_DIST);
 }
 
-function exitVR() {
-  vrMode = false;
-  vrBaseQuat = null;
-  orbital.baseQuat = null;
-  document.body.classList.remove('vr-mode');
-  hideOverlay();
-  stopMotion();
-  window.removeEventListener('deviceorientation', onGyro, true);
-  if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
-  resize();
-}
-
-function initGyro() {
-  window.addEventListener('deviceorientation', onGyro, true);
-  startMotion();
+function resetPosition() {
+  accelPosition.set(0, 0, orbitState.radius || 2.5);
+  accelVelocity.set(0,0,0);
 }
 
 function onGyro(e) {
   if (!vrMode) return;
-
-  const DEG = Math.PI / 180;
-  const alpha = (e.alpha || 0) * DEG;
-  const beta  = (e.beta  || 0) * DEG;
-  const gamma = (e.gamma || 0) * DEG;
-  // 生角度を保存（加速度の重力除去に使用）
-  _rawBeta  = e.beta  || 0;
-  _rawGamma = e.gamma || 0;
-
-  // 画面の向き（ラジアン）
-  // screen.orientation.angle: 0=縦, 90=右横, 270=左横
-  const orientDeg = (screen.orientation && screen.orientation.angle != null)
-    ? screen.orientation.angle
-    : (window.orientation || 0);
+  const DEG = Math.PI/180;
+  let alpha = (e.alpha||0)*DEG, beta = (e.beta||0)*DEG, gamma = (e.gamma||0)*DEG;
+  const orientDeg = (screen.orientation && screen.orientation.angle != null) ? screen.orientation.angle : (window.orientation || 0);
   const orient = orientDeg * DEG;
-
-  // ── Three.js DeviceOrientationControls 準拠の正規実装 ──
-  //
-  // Step1: alpha(Z回転), beta(X回転), gamma(Y回転) → クォータニオン
-  //        回転順序は 'YXZ'（W3C deviceorientation 仕様に対応）
   const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
-  const q = new THREE.Quaternion().setFromEuler(euler);
-
-  // Step2: デバイス前面をカメラの前方向（-Z）に合わせる補正
-  //        デバイス座標系ではZ上向きがデフォルトなので-X軸で-90°回転
-  const qScreen = new THREE.Quaternion(
-    -Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)  // -90° around X
-  );
+  let q = new THREE.Quaternion().setFromEuler(euler);
+  const qScreen = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
   q.multiply(qScreen);
-
-  // Step3: 画面の回転（縦→横など）をZ軸回転で補正
-  //        これにより landscape / portrait どちらでも正しく動く
-  const qOrient = new THREE.Quaternion();
-  qOrient.setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
+  const qOrient = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -orient);
   q.multiply(qOrient);
-
-  // 絶対姿勢を保存（加速度の重力除去に使用）
-  vrAbsQuat = q.clone();
-
-  // VR開始時の向きを基準として相対回転を計算
-  if (!vrBaseQuat) {
-    vrBaseQuat = q.clone().invert();
-  }
-  vrQuat = vrBaseQuat.clone().multiply(q);
+  vrAbsQuat.copy(q);
+  if (!vrBaseQuat) vrBaseQuat = q.clone().invert();
+  gyroQuat = vrBaseQuat.clone().multiply(q);
 }
 
-// ============================================================
-// Cardboard VR パラメータ（Google Cardboard v1）
-// ============================================================
-const CARD_K1  = 0.441;
-const CARD_K2  = 0.156;
-const CARD_FOV = 90;
-
-// ============================================================
-// 非対称フラスタム（Parallel Stereo）
-// eyeSign: 左目=+1, 右目=-1
-// ============================================================
-function buildAsymmetricFrustum(cam, eyeSign, focalLength) {
-  const fov    = THREE.MathUtils.degToRad(CARD_FOV);
-  const aspect = cam.aspect;
-  const near   = cam.near;
-  const far    = cam.far;
-  const top    =  near * Math.tan(fov / 2);
-  const bottom = -top;
-  const right0 =  top * aspect;
-  const left0  = -right0;
-  const shift  = (IPD / 2) * (near / Math.max(focalLength, 0.01)) * eyeSign;
-  cam.projectionMatrix.makePerspective(
-    left0 + shift, right0 + shift, top, bottom, near, far
-  );
-  cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+function startSensors() {
+  const doGyro = () => window.addEventListener('deviceorientation', onGyro, true);
+  const doMotion = () => window.addEventListener('devicemotion', onMotion, true);
+  if (typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission) {
+    DeviceOrientationEvent.requestPermission().then(s => { if(s==='granted') doGyro(); }).catch(()=>doGyro());
+  } else doGyro();
+  if (typeof DeviceMotionEvent !== 'undefined' && DeviceMotionEvent.requestPermission) {
+    DeviceMotionEvent.requestPermission().then(s => { if(s==='granted') doMotion(); }).catch(()=>doMotion());
+  } else doMotion();
 }
 
-// ============================================================
-// renderVR
-// RenderTargetは使わずviewport/scissorで直接描画する。
-// iOS SafariはWebGLRenderTargetのコンポジットが不安定なため
-// 直接描画方式が最も確実。
-// 樽型歪みはCanvas 2Dオーバーレイで後処理する。
-// ============================================================
-
-// 樽型歪みオーバーレイ用canvas（遅延生成）
-let _overlayCanvas = null;
-let _overlayCtx    = null;
-
-function getOverlay() {
-  if (_overlayCanvas) return { c: _overlayCanvas, ctx: _overlayCtx };
-  _overlayCanvas = document.createElement('canvas');
-  _overlayCanvas.style.cssText =
-    'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;';
-  document.body.appendChild(_overlayCanvas);
-  _overlayCtx = _overlayCanvas.getContext('2d');
-  return { c: _overlayCanvas, ctx: _overlayCtx };
+function stopSensors() {
+  window.removeEventListener('deviceorientation', onGyro, true);
+  window.removeEventListener('devicemotion', onMotion, true);
 }
 
-function applyBarrelDistortion(srcCanvas, eyeSign) {
-  // eyeSign: 左=-1（左半分をコピー）, 右=+1（右半分をコピー）
-  const { c: oc, ctx } = getOverlay();
-  const W  = srcCanvas.width;
-  const H  = srcCanvas.height;
-  const hw = Math.floor(W / 2);
-
-  oc.width  = W;
-  oc.height = H;
-
-  // 歪みなし側をそのままコピー（まずクリア）
-  ctx.clearRect(0, 0, W, H);
-
-  // 歪みテーブル（フルサイズ用・簡易ピクセルマッピング）
-  // Canvas 2D は per-pixel 変換が重いため
-  // ここでは WebGL で描いた内容をそのまま表示し
-  // 樽型「見かけ効果」は非対称フラスタムの広角FOVで代替する。
-  // ※ Canvas 2Dの drawImage + scale でレンズ効果を近似
-  const cx = eyeSign < 0 ? hw / 2 : hw + hw / 2;
-  const cy = H / 2;
-  const sx = eyeSign < 0 ? 0 : hw;
-
-  // 中央をわずかに拡大して外周を暗くする（ビネット効果）
-  const scale = 1.08;
-  const dw = hw * scale;
-  const dh = H  * scale;
-  const dx = cx - dw / 2;
-  const dy = cy - dh / 2;
-
-  ctx.save();
-  ctx.drawImage(srcCanvas, sx, 0, hw, H, dx, dy, dw, dh);
-
-  // ビネット（レンズ周辺減光）
-  const gx = eyeSign < 0 ? hw / 2 : hw + hw / 2;
-  const grad = ctx.createRadialGradient(gx, cy, hw * 0.35, gx, cy, hw * 0.75);
-  grad.addColorStop(0,   'rgba(0,0,0,0)');
-  grad.addColorStop(1,   'rgba(0,0,0,0.65)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(eyeSign < 0 ? 0 : hw, 0, hw, H);
-  ctx.restore();
-}
-
-function showOverlay() {
-  if (_overlayCanvas) _overlayCanvas.style.display = 'block';
-}
-function hideOverlay() {
-  if (_overlayCanvas) _overlayCanvas.style.display = 'none';
-}
-
-// VR描画フレームのdeltaTime計測用
-let _vrLastTime = null;
-
+// VR レンダリング（ステレオ＋非対称フラスタム）
 function renderVR() {
   const vvp = window.visualViewport || window;
-  const W   = Math.floor(vvp.width  || window.innerWidth);
-  const H   = Math.floor(vvp.height || window.innerHeight);
-  const hw  = Math.floor(W / 2);
-
-  // deltaTime → センサー積分
+  const W = Math.floor(vvp.width || window.innerWidth);
+  const H = Math.floor(vvp.height || window.innerHeight);
+  const hw = Math.floor(W/2);
   const now = performance.now();
-  const dt  = _vrLastTime !== null ? Math.min((now - _vrLastTime) / 1000, 0.05) : 0;
-  _vrLastTime = now;
-  if (dt > 0) updateMotion(dt);
+  const dt = lastTimestamp ? Math.min((now - lastTimestamp)/1000, 0.05) : 0.016;
+  lastTimestamp = now;
+  if (vrMode) updateAccelMovement(dt);
 
-  // ── アイレベル：オブジェクトのバウンディングボックス中心 ──
   let objCenter = orbitState.target.clone();
-  if (meshGroup) {
-    const box = new THREE.Box3().setFromObject(meshGroup);
-    box.getCenter(objCenter);
-  }
+  if (meshGroup) { const box = new THREE.Box3().setFromObject(meshGroup); box.getCenter(objCenter); }
 
-  // ── カメラ位置 ──
-  // orbital.camPos = オブジェクト中心からのオフセット（センサーが更新）
-  // ジャイロがない or VR未開始の場合は通常のorbitカメラを使用
-  let camWorldPos;
-  if (vrBaseQuat) {
-    // ジャイロ有効：センサーが蓄積したcamPosをそのまま使う
-    camWorldPos = objCenter.clone().add(orbital.camPos);
-  } else {
-    camWorldPos = camera.position.clone();
-  }
-
-  // ── 両目は常にobjCenterを向く（アイレベル固定）──
-  const forward  = objCenter.clone().sub(camWorldPos).normalize();
-  const worldUp  = new THREE.Vector3(0, 1, 0);
-  const rightVec = new THREE.Vector3()
-    .crossVectors(forward, worldUp)
-    .normalize();
-
+  // カメラ位置 = オブジェクト中心 + 加速度移動オフセット
+  const camPosRaw = accelPosition.clone();
+  const camWorldPos = objCenter.clone().add(camPosRaw);
+  const forward = objCenter.clone().sub(camWorldPos).normalize();
+  const worldUp = new THREE.Vector3(0,1,0);
+  const rightVec = new THREE.Vector3().crossVectors(forward, worldUp).normalize();
   const focalLen = Math.max(camWorldPos.distanceTo(objCenter), 0.1);
-  const aspect   = hw / H;
+  const aspect = hw/H;
 
-  // 左カメラ
-  camL.position.copy(camWorldPos).addScaledVector(rightVec, -IPD / 2);
-  camL.lookAt(objCenter);
-  camL.fov    = CARD_FOV;
-  camL.aspect = aspect;
-  camL.near   = camera.near;
-  camL.far    = camera.far;
-  camL.updateProjectionMatrix();
-  buildAsymmetricFrustum(camL, +1, focalLen);
+  // ジャイロによる回転をカメラの向きに適用
+  const viewDir = forward.clone().applyQuaternion(gyroQuat);
+  const upDir = worldUp.clone().applyQuaternion(gyroQuat);
+  const lookAtPoint = camWorldPos.clone().add(viewDir);
 
-  // 右カメラ
-  camR.position.copy(camWorldPos).addScaledVector(rightVec, +IPD / 2);
-  camR.lookAt(objCenter);
-  camR.fov    = CARD_FOV;
-  camR.aspect = aspect;
-  camR.near   = camera.near;
-  camR.far    = camera.far;
-  camR.updateProjectionMatrix();
-  buildAsymmetricFrustum(camR, -1, focalLen);
-
-  // 描画
+  const setCamera = (cam, eyeSign) => {
+    cam.position.copy(camWorldPos).addScaledVector(rightVec, eyeSign * IPD/2);
+    cam.lookAt(lookAtPoint);
+    cam.fov = 90;
+    cam.aspect = aspect;
+    cam.near = 0.01;
+    cam.far = 100;
+    cam.updateProjectionMatrix();
+    const near = cam.near;
+    const top = near * Math.tan(THREE.MathUtils.degToRad(45));
+    const bottom = -top;
+    const right0 = top * aspect;
+    const left0 = -right0;
+    const shift = (IPD/2) * (near / Math.max(focalLen,0.01)) * eyeSign;
+    cam.projectionMatrix.makePerspective(left0 + shift, right0 + shift, top, bottom, near, cam.far);
+    cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
+  };
+  setCamera(camL, +1);
+  setCamera(camR, -1);
   renderer.setScissorTest(true);
-  renderer.setViewport(0,  0, hw, H);
-  renderer.setScissor( 0,  0, hw, H);
-  renderer.render(scene, camL);
-  renderer.setViewport(hw, 0, hw, H);
-  renderer.setScissor( hw, 0, hw, H);
-  renderer.render(scene, camR);
+  renderer.setViewport(0,0,hw,H); renderer.setScissor(0,0,hw,H); renderer.render(scene, camL);
+  renderer.setViewport(hw,0,hw,H); renderer.setScissor(hw,0,hw,H); renderer.render(scene, camR);
   renderer.setScissorTest(false);
-  renderer.setViewport(0, 0, W, H);
+  renderer.setViewport(0,0,W,H);
 }
 
-// ============================================================
-// リサイズ
-// ============================================================
-function resize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  renderer.setSize(w, h);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+function enterVR() {
+  if (!meshGroup) { alert('先にSTLファイルを読み込んでください'); return; }
+  const vtEl = document.getElementById('vr-transition');
+  const vtSt = document.getElementById('vr-status');
+  if (vtEl && vtSt) {
+    vtEl.classList.add('active');
+    const msgs = ['SYNCHRONIZING GYROSCOPE...', 'CALIBRATING ACCELEROMETER...', '6DOF READY'];
+    let mi=0;
+    const iv = setInterval(()=>{ mi++; if(mi<msgs.length) vtSt.textContent=msgs[mi]; else { clearInterval(iv); vtSt.textContent='>>> LAUNCH <<<'; } },500);
+    setTimeout(()=>{ vtEl.classList.remove('active'); clearInterval(iv); }, 1500);
+  }
+  setTimeout(() => {
+    vrMode = true;
+    document.body.classList.add('vr-mode');
+    hideOverlay();
+    if (meshGroup) {
+      const box = new THREE.Box3().setFromObject(meshGroup);
+      const size = new THREE.Vector3(); box.getSize(size);
+      const baseDist = size.length() * 1.2;
+      accelPosition.set(0, 0, baseDist);
+      orbitState.radius = baseDist;
+      const center = new THREE.Vector3(); box.getCenter(center);
+      orbitState.target.copy(center);
+    }
+    accelVelocity.set(0,0,0);
+    vrBaseQuat = null;
+    hasAccel = false; calibDone = false;
+    startSensors();
+    if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(()=>{});
+  }, 300);
 }
-window.addEventListener('resize', resize);
-resize();
 
-// ============================================================
-// アニメーションループ
-// ============================================================
+function exitVR() {
+  vrMode = false;
+  document.body.classList.remove('vr-mode');
+  hideOverlay();
+  stopSensors();
+  if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+  resize();
+}
+
+// オーバーレイ（樽型歪みダミー）
+let _overlayCanvas = null;
+function hideOverlay() { if(_overlayCanvas) _overlayCanvas.style.display = 'none'; }
+function getOverlay() { if(!_overlayCanvas){ _overlayCanvas=document.createElement('canvas'); _overlayCanvas.style.cssText='position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;'; document.body.appendChild(_overlayCanvas); } return _overlayCanvas; }
+
+// 通常モードアニメーション
 let autoRotate = false;
-
 function animate() {
   requestAnimationFrame(animate);
-
-  if (meshGroup && autoRotate && !vrMode) {
-    meshGroup.rotation.y += 0.003;
-  }
-
-  if (vrMode) {
-    renderVR();
-  } else {
-    renderer.setViewport(0, 0, canvas.width, canvas.height);
-    renderer.render(scene, camera);
-  }
+  if (meshGroup && autoRotate && !vrMode) meshGroup.rotation.y += 0.003;
+  if (vrMode) renderVR();
+  else { renderer.setViewport(0,0,canvas.width,canvas.height); renderer.render(scene, camera); }
 }
 animate();
 
-// ============================================================
 // UI イベント
-// ============================================================
 document.getElementById('btn-vr').addEventListener('click', enterVR);
 document.getElementById('vr-exit').addEventListener('click', exitVR);
-
-document.getElementById('btn-reset').addEventListener('click', () => {
-  if (!meshGroup) return;
-  orbitState.theta  = 0.5;
-  orbitState.phi    = Math.PI / 3;
-  orbitState.target.set(0, 0, 0);
-  const box = new THREE.Box3().setFromObject(meshGroup);
-  const sz  = new THREE.Vector3();
-  box.getSize(sz);
-  orbitState.radius = sz.length() * 1.4;
-  updateCameraFromOrbit();
+document.getElementById('btn-reset').addEventListener('click', ()=>{
+  if(!meshGroup) return;
+  orbitState.theta=0.5; orbitState.phi=Math.PI/3; orbitState.target.set(0,0,0);
+  const box=new THREE.Box3().setFromObject(meshGroup); const sz=new THREE.Vector3(); box.getSize(sz);
+  orbitState.radius=sz.length()*1.4; updateCameraFromOrbit();
+  resetPosition();
 });
-
-document.getElementById('btn-wireframe').addEventListener('click', function() {
-  const next = currentMode === 'wire' ? 'color' : 'wire';
-  applyDisplayMode(next);
-  this.classList.toggle('active', next === 'wire');
-});
-
-document.getElementById('btn-color').addEventListener('click', function() {
-  const next = currentMode === 'color' ? 'solid' : 'color';
-  applyDisplayMode(next);
-  this.textContent = next === 'color' ? 'COLOR' : 'SOLID';
-  this.classList.toggle('active', next === 'solid');
-});
-
-document.getElementById('btn-open').addEventListener('click', () => {
-  document.getElementById('file-input').click();
-});
-
-document.getElementById('file-btn-open').addEventListener('click', () => {
-  document.getElementById('file-input').click();
-});
-
-document.getElementById('file-input').addEventListener('change', e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  document.getElementById('dropzone').classList.add('hidden');
-  file.arrayBuffer().then(buf => loadSTLBuffer(buf, file.name));
-});
-
-// ドラッグ＆ドロップ（ドロップゾーン）
+document.getElementById('btn-wireframe').addEventListener('click', function(){ const next = currentMode==='wire'?'color':'wire'; applyDisplayMode(next); this.classList.toggle('active', next==='wire'); });
+document.getElementById('btn-color').addEventListener('click', function(){ const next = currentMode==='color'?'solid':'color'; applyDisplayMode(next); this.textContent = next==='color'?'COLOR':'SOLID'; this.classList.toggle('active', next==='solid'); });
+document.getElementById('btn-open').addEventListener('click', ()=>document.getElementById('file-input').click());
+document.getElementById('file-btn-open').addEventListener('click', ()=>document.getElementById('file-input').click());
+document.getElementById('file-input').addEventListener('change', e=>{ if(e.target.files[0]) e.target.files[0].arrayBuffer().then(buf=>loadSTLBuffer(buf, e.target.files[0].name)); });
 const dropBox = document.getElementById('drop-box');
-['dragenter','dragover'].forEach(ev => {
-  document.body.addEventListener(ev, e => {
-    e.preventDefault();
-    // デスクトップのみドロップゾーンを表示（タッチデバイスは除外）
-    if (!e.sourceCapabilities || !e.sourceCapabilities.firesTouchEvents) {
-      document.getElementById('dropzone').classList.remove('hidden');
-    }
-    dropBox.classList.add('dragover');
-  });
+['dragenter','dragover'].forEach(ev=>{ document.body.addEventListener(ev,e=>{ e.preventDefault(); if(!e.sourceCapabilities?.firesTouchEvents) document.getElementById('dropzone').classList.remove('hidden'); dropBox.classList.add('dragover'); }); });
+document.body.addEventListener('dragleave', e=>{ if(e.relatedTarget===null) dropBox.classList.remove('dragover'); });
+document.body.addEventListener('drop', e=>{ e.preventDefault(); dropBox.classList.remove('dragover'); const file=e.dataTransfer.files[0]; if(file && file.name.toLowerCase().endsWith('.stl')) file.arrayBuffer().then(buf=>loadSTLBuffer(buf, file.name)); });
+
+// ダブルタップで位置リセット（VR時）
+let lastTap=0;
+canvas.addEventListener('touchend', e=>{
+  if(!vrMode) return;
+  const now=Date.now();
+  if(now-lastTap<300) { resetPosition(); e.preventDefault(); }
+  lastTap=now;
 });
-document.body.addEventListener('dragleave', e => {
-  if (e.relatedTarget === null) dropBox.classList.remove('dragover');
-});
-document.body.addEventListener('drop', e => {
-  e.preventDefault();
-  dropBox.classList.remove('dragover');
-  const file = e.dataTransfer.files[0];
-  if (file && file.name.toLowerCase().endsWith('.stl')) {
-    file.arrayBuffer().then(buf => loadSTLBuffer(buf, file.name));
-  }
-});
+function resize(){ const w=window.innerWidth, h=window.innerHeight; renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+window.addEventListener('resize', resize); resize();
 
-// ============================================================
-// デフォルト地形：パーリンノイズで山岳地形を生成
-// ============================================================
-function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-function lerpN(a, b, t) { return a + t * (b - a); }
-
-const perm = (() => {
-  const p = Array.from({length: 256}, (_, i) => i);
-  for (let i = 255; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [p[i], p[j]] = [p[j], p[i]];
-  }
-  return [...p, ...p];
-})();
-
-function grad2(hash, x, y) {
-  const h = hash & 3;
-  const u = h < 2 ? x : y, v = h < 2 ? y : x;
-  return (h & 1 ? -u : u) + (h & 2 ? -v : v);
-}
-
-function noise2(x, y) {
-  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-  const xf = x - Math.floor(x), yf = y - Math.floor(y);
-  const u = fade(xf), v = fade(yf);
-  const a = perm[X] + Y, b = perm[X+1] + Y;
-  return lerpN(
-    lerpN(grad2(perm[a],   xf,   yf), grad2(perm[b],   xf-1, yf  ), u),
-    lerpN(grad2(perm[a+1], xf,   yf-1), grad2(perm[b+1], xf-1, yf-1), u),
-    v
-  );
-}
-
-function fbm(x, y, octaves=6) {
-  let v=0, amp=0.5, freq=1, max=0;
-  for (let i=0; i<octaves; i++) {
-    v += noise2(x*freq, y*freq) * amp;
-    max += amp; amp *= 0.5; freq *= 2.1;
-  }
-  return v / max;
-}
-
-function generateDefaultTerrain() {
-  const RES = 80, SCALE = 3.0;
-  const positions = [], normals = [];
-
-  const h = (nx, nz) => {
-    const tx = nx/SCALE+0.5, tz = nz/SCALE+0.5;
-    let v = fbm(tx*3.5, tz*3.5);
-    const d = Math.sqrt((tx-0.5)*(tx-0.5)*0.5 + (tz-0.5)*(tz-0.5)*0.5);
-    v = v*0.7 + Math.max(0, 0.4 - d*2.2)*0.9;
-    const edge = Math.min(tx, tz, 1-tx, 1-tz) * 6;
-    return Math.max(0, v * Math.min(1, edge)) * 2.0;
-  };
-
-  const pushTri = (ax,ay,az, bx,by,bz, cx,cy,cz) => {
-    const ux=bx-ax, uy=by-ay, uz=bz-az;
-    const vx=cx-ax, vy=cy-ay, vz=cz-az;
-    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz2=ux*vy-uy*vx;
-    const nl=Math.sqrt(nx*nx+ny*ny+nz2*nz2)||1;
-    for (let i=0;i<3;i++) normals.push(nx/nl, ny/nl, nz2/nl);
-    positions.push(ax,ay,az, bx,by,bz, cx,cy,cz);
-  };
-
-  for (let iy=0; iy<RES; iy++) {
-    for (let ix=0; ix<RES; ix++) {
-      const x0=(ix/RES-0.5)*SCALE, x1=((ix+1)/RES-0.5)*SCALE;
-      const z0=(iy/RES-0.5)*SCALE, z1=((iy+1)/RES-0.5)*SCALE;
-      const y00=h(x0,z0), y10=h(x1,z0), y01=h(x0,z1), y11=h(x1,z1);
-      pushTri(x0,y00,z0, x1,y10,z0, x0,y01,z1);
-      pushTri(x1,y10,z0, x1,y11,z1, x0,y01,z1);
-    }
-  }
+// デフォルト地形生成
+function generateDefaultTerrain(){
+  const RES=80, SCALE=3.0; const positions=[], normals=[];
+  const fade=t=>t*t*t*(t*(t*6-15)+10);
+  const perm=(()=>{ let p=[...Array(256).keys()]; for(let i=255;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [p[i],p[j]]=[p[j],p[i]]; } return [...p,...p]; })();
+  const grad2=(h,x,y)=>{ const u=h&2?x:y, v=h&2?y:x; return (h&1?-u:u)+(h&2?-v:v); };
+  const noise2=(x,y)=>{ const X=Math.floor(x)&255, Y=Math.floor(y)&255; const xf=x-Math.floor(x), yf=y-Math.floor(y); const u=fade(xf), v=fade(yf); const a=perm[X]+Y, b=perm[X+1]+Y; return (1-u)*(1-v)*grad2(perm[a],xf,yf)+u*(1-v)*grad2(perm[b],xf-1,yf)+(1-u)*v*grad2(perm[a+1],xf,yf-1)+u*v*grad2(perm[b+1],xf-1,yf-1); };
+  const fbm=(x,y,oct=6)=>{ let v=0,amp=0.5,freq=1,max=0; for(let i=0;i<oct;i++){ v+=noise2(x*freq,y*freq)*amp; max+=amp; amp*=0.5; freq*=2.1; } return v/max; };
+  const h=(nx,nz)=>{ const tx=nx/SCALE+0.5, tz=nz/SCALE+0.5; let v=fbm(tx*3.5,tz*3.5); const d=Math.sqrt((tx-0.5)*(tx-0.5)*0.5+(tz-0.5)*(tz-0.5)*0.5); v=v*0.7+Math.max(0,0.4-d*2.2)*0.9; const edge=Math.min(tx,tz,1-tx,1-tz)*6; return Math.max(0,v*Math.min(1,edge))*2.0; };
+  const pushTri=(ax,ay,az,bx,by,bz,cx,cy,cz)=>{ const ux=bx-ax, uy=by-ay, uz=bz-az, vx=cx-ax, vy=cy-ay, vz=cz-az; const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz2=ux*vy-uy*vx; const nl=Math.hypot(nx,ny,nz2)||1; for(let i=0;i<3;i++) normals.push(nx/nl, ny/nl, nz2/nl); positions.push(ax,ay,az, bx,by,bz, cx,cy,cz); };
+  for(let iy=0;iy<RES;iy++) for(let ix=0;ix<RES;ix++){ const x0=(ix/RES-0.5)*SCALE, x1=((ix+1)/RES-0.5)*SCALE; const z0=(iy/RES-0.5)*SCALE, z1=((iy+1)/RES-0.5)*SCALE; const y00=h(x0,z0), y10=h(x1,z0), y01=h(x0,z1), y11=h(x1,z1); pushTri(x0,y00,z0, x1,y10,z0, x0,y01,z1); pushTri(x1,y10,z0, x1,y11,z1, x0,y01,z1); }
   return { positions: new Float32Array(positions), normals: new Float32Array(normals), faceCount: RES*RES*2 };
 }
-
-// initDefaultを起動アニメーション完了後に遅延実行（メインスレッドブロック防止）
-(function initDefault() {
-  setTimeout(() => { try {
-  const data = generateDefaultTerrain();
-  const geo  = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-  geo.setAttribute('normal',   new THREE.BufferAttribute(data.normals,   3));
-  applyElevationColor(geo);
-
-  if (meshGroup) scene.remove(meshGroup);
-  meshGroup = new THREE.Group();
-  const solidMesh = new THREE.Mesh(geo, solidMat.clone()); solidMesh.name='solid';
-  const wireMesh  = new THREE.Mesh(geo.clone(), wireMat.clone()); wireMesh.name='wire'; wireMesh.visible=false;
-  meshGroup.add(solidMesh, wireMesh);
-  scene.add(meshGroup);
-
-  const box=new THREE.Box3().setFromObject(meshGroup), sz=new THREE.Vector3();
-  box.getSize(sz);
-  grid.position.y   = box.min.y - 0.01;
-  orbitState.radius = sz.length() * 1.2;
-  orbitState.phi    = Math.PI / 3.5;
-  updateCameraFromOrbit();
-
-  document.getElementById('status-file').textContent = 'DEFAULT TERRAIN';
-  document.getElementById('status-info').textContent = 'FACES: '+data.faceCount.toLocaleString()+'  PROCEDURAL GENERATION';
-  document.getElementById('dropzone').classList.add('hidden');
-  applyDisplayMode('color');
-  } catch(e) {
-    console.error('Default terrain error:', e);
-    document.getElementById('dropzone').classList.remove('hidden');
-  }
-  }, 3200); // 起動アニメーション完了後（約3秒）に実行
-})();
-
-// ============================================================
-// 起動画面アニメーション（MAGIシステム起動シーケンス）
-// ============================================================
-
-// ============================================================
-// 初期カメラ位置
-// ============================================================
+setTimeout(()=>{
+  try{
+    const data=generateDefaultTerrain();
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.BufferAttribute(data.positions,3));
+    geo.setAttribute('normal',new THREE.BufferAttribute(data.normals,3));
+    applyElevationColor(geo);
+    if(meshGroup) scene.remove(meshGroup);
+    meshGroup=new THREE.Group();
+    const solidMesh=new THREE.Mesh(geo,solidMat.clone()); solidMesh.name='solid';
+    const wireMesh=new THREE.Mesh(geo.clone(),wireMat.clone()); wireMesh.name='wire'; wireMesh.visible=false;
+    meshGroup.add(solidMesh,wireMesh); scene.add(meshGroup);
+    const box=new THREE.Box3().setFromObject(meshGroup), sz=new THREE.Vector3(); box.getSize(sz);
+    grid.position.y=box.min.y-0.01;
+    orbitState.radius=sz.length()*1.2; orbitState.phi=Math.PI/3.5; updateCameraFromOrbit();
+    document.getElementById('status-file').textContent='DEFAULT TERRAIN';
+    document.getElementById('status-info').textContent='FACES: '+data.faceCount.toLocaleString()+'  PROCEDURAL';
+    document.getElementById('dropzone').classList.add('hidden');
+    applyDisplayMode('color');
+  }catch(e){ console.error(e); document.getElementById('dropzone').classList.remove('hidden'); }
+}, 3200);
 updateCameraFromOrbit();
 
-
-
-// ===== パトレイバー風起動シーケンス =====
-(function() {
-  'use strict';
-
-  // DOM要素取得（nullガード付き）
-  const getEl = id => document.getElementById(id);
-  const log    = getEl('boot-log');
-  const fill   = getEl('boot-bar-fill');
-  const phLbl  = getEl('boot-phase-label');
-  const pctLbl = getEl('boot-pct-label');
-  const timeLbl= getEl('boot-time');
-  const ftrR   = getEl('boot-ftr-r');
-  const boot   = getEl('boot');
-
-  // 必須要素チェック
-  if (!boot || !log || !fill) {
-    console.error('Boot elements not found');
-    return;
-  }
-
-  const LINES = [
-    ['dim',  ' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],
-    ['dim',  ' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],
-    ['dim',  ''],
-    ['ok',   ' [BIOS] POST CHECK ........................ PASS'],
-    ['ok',   ' [MEM]  2048KB EXTENDED MEMORY ........... OK'],
-    ['ok',   ' [CPU]  MOTOROLA 68040 @ 40MHz ............ OK'],
-    ['ok',   ' [GPU]  FRAME BUFFER 640x480 .............. OK'],
-    ['ok',   ' [COM1] HELMET LINK MODULE ................ OK'],
-    ['warn', ' [CAM]  HELMETCAM ................... OFFLINE'],
-    ['ok',   ' [NET]  POLICE RADIO UNIT ................. OK'],
-    ['dim',  ''],
-    ['hi',   ' LOADING KERNEL ...'],
-    ['ok',   ' [KERNEL] AV-OS 4.12 ...................... OK'],
-    ['ok',   ' [DRIVER] GYROSCOPE UNIT .................. OK'],
-    ['ok',   ' [DRIVER] STEREO OPTICS ................... OK'],
-    ['ok',   ' [DRIVER] 3D MESH RENDERER ................ OK'],
-    ['ok',   ' [DRIVER] MOTION SENSOR ................... OK'],
-    ['dim',  ''],
-    ['hi',   ' CHECKING LABOR STATUS ...'],
-    ['ok',   ' UNIT-1  AV-98 INGRAM ................ STANDBY'],
-    ['warn', ' UNIT-2  AV-98 INGRAM .............. DAMAGED'],
-    ['ok',   ' HANNIBAL  TYPE-J9 BROCKEN ........... STANDBY'],
-    ['dim',  ''],
-    ['hi',   ' ALL SYSTEMS GO'],
-    ['ok',   ' LAUNCHING STL//VR VISUALIZATION UNIT ...'],
-  ];
-
-  const PHASES = [
-    'BIOS / MEMORY CHECK',
-    'PERIPHERAL INIT',
-    'KERNEL LOAD',
-    'DRIVER SETUP',
-    'LABOR STATUS CHECK',
-    'LAUNCH',
-  ];
-
-  // シーケンス: [経過ms, lineIdx, pct, phaseIdx?, ftrTxt?]
-  const SEQ = [
-    [0,    0,  2],
-    [120,  1,  4],
-    [220,  2,  5],
-    [320,  3, 10, 0],
-    [440,  4, 14],
-    [560,  5, 18],
-    [680,  6, 22],
-    [800,  7, 27, 1],
-    [920,  8, 31],
-    [1040, 9, 35, undefined, 'HELMETCAM: SEARCHING...'],
-    [1160, 10, 38],
-    [1280, 11, 42, 2],
-    [1400, 12, 48],
-    [1520, 13, 54, 3],
-    [1640, 14, 59],
-    [1760, 15, 64],
-    [1880, 16, 69],
-    [1980, 17, 72],
-    [2080, 18, 76, 4],
-    [2200, 19, 82, undefined, 'HELMETCAM: OFFLINE'],
-    [2320, 20, 87],
-    [2420, 21, 90],
-    [2540, 22, 93],
-    [2660, 23, 97, 5],
-    [2820, 24, 100],
-  ];
-
-  // DOM操作
-  function addLine(type, text) {
-    if (!log) return;
-    const el = document.createElement('div');
-    el.className = 'bl ' + type;
-    el.textContent = text;
-    log.appendChild(el);
-    // 古い行を同期的に削除（非同期だとwhileが無限ループする）
-    while (log.children.length > 14) {
-      log.children[0].remove();
-    }
-    requestAnimationFrame(() => el.classList.add('s'));
-  }
-
-  function setPct(pct, phase) {
-    if (fill)   fill.style.width = pct + '%';
-    if (pctLbl) pctLbl.textContent = Math.round(pct) + '%';
-    if (phase !== undefined && phLbl)
-      phLbl.textContent = PHASES[phase] || '';
-  }
-
-  function setFtr(txt) { if (ftrR) ftrR.textContent = txt; }
-
-  // 時計
-  const t0 = performance.now();
-  const clkIv = setInterval(() => {
-    if (!timeLbl) return;
-    const ms = performance.now() - t0;
-    const s  = String(Math.floor(ms/1000)%60).padStart(2,'0');
-    const m  = String(Math.floor(ms/60000)%60).padStart(2,'0');
-    const h  = String(Math.floor(ms/3600000)).padStart(2,'0');
-    timeLbl.textContent = h+':'+m+':'+s;
-  }, 100);
-
-  // 完了処理
-  function finish() {
-    clearInterval(clkIv);
-    clearInterval(mainIv);
-    boot.classList.add('done');
-    const onEnd = () => { boot.style.display = 'none'; };
-    boot.addEventListener('animationend', onEnd, { once: true });
-    // animationendが発火しない環境へのフォールバック
-    setTimeout(onEnd, 600);
-  }
-
-  // ── メインループ（setIntervalで50msごとにチェック）──
-  // setTimeout複数発行より安定してモバイルで動作する
-  let seqIdx = 0;
-  let done   = false;
-  const TOTAL_MS = 3200;
-  let mainIv;
-
-  mainIv = setInterval(() => {
-    if (done) return;
-    const elapsed = performance.now() - t0;
-
-    // 経過時間に達したSEQエントリを全て処理
-    while (seqIdx < SEQ.length && elapsed >= SEQ[seqIdx][0]) {
-      const [, li, pct, phase, ftr] = SEQ[seqIdx];
-      if (li < LINES.length) addLine(...LINES[li]);
-      setPct(pct, phase);
-      if (ftr !== undefined) setFtr(ftr);
-      seqIdx++;
-    }
-
-    // 完了チェック
-    if (elapsed >= TOTAL_MS && !done) {
-      done = true;
-      finish();
-    }
-  }, 50);  // 50msポーリング = 20Hz（setTimeoutより確実）
-
+// 起動シーケンス
+(function(){
+  const log=document.getElementById('boot-log'), fill=document.getElementById('boot-bar-fill'), phLbl=document.getElementById('boot-phase-label'), pctLbl=document.getElementById('boot-pct-label'), timeLbl=document.getElementById('boot-time'), ftrR=document.getElementById('boot-ftr-r'), boot=document.getElementById('boot');
+  if(!boot) return;
+  const LINES=[['dim',' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],['dim',' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],['dim',''],['ok',' [BIOS] POST CHECK ........................ PASS'],['ok',' [MEM]  2048KB EXTENDED MEMORY ........... OK'],['ok',' [CPU]  MOTOROLA 68040 @ 40MHz ............ OK'],['ok',' [GPU]  FRAME BUFFER 640x480 .............. OK'],['ok',' [COM1] HELMET LINK MODULE ................ OK'],['warn',' [CAM]  HELMETCAM ................... OFFLINE'],['ok',' [NET]  POLICE RADIO UNIT ................. OK'],['dim',''],['hi',' LOADING KERNEL ...'],['ok',' [KERNEL] AV-OS 4.12 ...................... OK'],['ok',' [DRIVER] GYROSCOPE UNIT .................. OK'],['ok',' [DRIVER] STEREO OPTICS ................... OK'],['ok',' [DRIVER] 3D MESH RENDERER ................ OK'],['ok',' [DRIVER] MOTION SENSOR ................... OK'],['dim',''],['hi',' CHECKING LABOR STATUS ...'],['ok',' UNIT-1  AV-98 INGRAM ................ STANDBY'],['warn',' UNIT-2  AV-98 INGRAM .............. DAMAGED'],['ok',' HANNIBAL  TYPE-J9 BROCKEN ........... STANDBY'],['dim',''],['hi',' ALL SYSTEMS GO'],['ok',' LAUNCHING STL//VR VISUALIZATION UNIT ...']];
+  const PHASES=['BIOS / MEMORY CHECK','PERIPHERAL INIT','KERNEL LOAD','DRIVER SETUP','LABOR STATUS CHECK','LAUNCH'];
+  const SEQ=[[0,0,2],[120,1,4],[220,2,5],[320,3,10,0],[440,4,14],[560,5,18],[680,6,22],[800,7,27,1],[920,8,31],[1040,9,35,undefined,'HELMETCAM: SEARCHING...'],[1160,10,38],[1280,11,42,2],[1400,12,48],[1520,13,54,3],[1640,14,59],[1760,15,64],[1880,16,69],[1980,17,72],[2080,18,76,4],[2200,19,82,undefined,'HELMETCAM: OFFLINE'],[2320,20,87],[2420,21,90],[2540,22,93],[2660,23,97,5],[2820,24,100]];
+  const addLine=(type,text)=>{ const el=document.createElement('div'); el.className='bl '+type; el.textContent=text; log.appendChild(el); while(log.children.length>14) log.children[0].remove(); requestAnimationFrame(()=>el.classList.add('s')); };
+  const setPct=(pct,phase)=>{ if(fill) fill.style.width=pct+'%'; if(pctLbl) pctLbl.textContent=Math.round(pct)+'%'; if(phase!==undefined && phLbl) phLbl.textContent=PHASES[phase]||''; };
+  const setFtr=txt=>{ if(ftrR) ftrR.textContent=txt; };
+  const t0=performance.now();
+  const clkIv=setInterval(()=>{ if(timeLbl){ const ms=performance.now()-t0; timeLbl.textContent=`${String(Math.floor(ms/3600000)).padStart(2,'0')}:${String(Math.floor(ms/60000)%60).padStart(2,'0')}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`; } },100);
+  let seqIdx=0, done=false;
+  const mainIv=setInterval(()=>{
+    if(done) return;
+    const elapsed=performance.now()-t0;
+    while(seqIdx<SEQ.length && elapsed>=SEQ[seqIdx][0]){ const [,,li,pct,phase,ftr]=SEQ[seqIdx]; if(li<LINES.length) addLine(...LINES[li]); setPct(pct,phase); if(ftr!==undefined) setFtr(ftr); seqIdx++; }
+    if(elapsed>=3200 && !done){ done=true; clearInterval(clkIv); clearInterval(mainIv); boot.classList.add('done'); const onEnd=()=>{ boot.style.display='none'; }; boot.addEventListener('animationend',onEnd,{once:true}); setTimeout(onEnd,600); }
+  },50);
 })();
-
-// ===== VR移行演出 =====
-function showVRTransition(callback) {
-  const el = document.getElementById('vr-transition');
-  const st = document.getElementById('vr-status');
-
-  // 要素が見つからない場合は即コールバック
-  if (!el || !st) { callback(); return; }
-
-  const statuses = [
-    'INITIALIZING STEREO OPTICS...',
-    'SYNCHRONIZING GYROSCOPE...',
-    'CALIBRATING FIELD OF VIEW...',
-    'ACTIVATING HELMET DISPLAY...',
-    'VR MODE READY',
-  ];
-
-  let i = 0;
-  el.classList.add('active');
-
-  const finish = () => {
-    el.classList.remove('active', 'done');
-    callback();
-  };
-
-  const iv = setInterval(() => {
-    i++;
-    if (i < statuses.length) {
-      st.textContent = statuses[i];
-    } else {
-      clearInterval(iv);
-      st.textContent = '>>> LAUNCH <<<';
-      setTimeout(() => {
-        el.classList.add('done');
-        // animationendのフォールバック（iOS Safariで発火しないケースに対応）
-        const fallback = setTimeout(finish, 600);
-        el.addEventListener('animationend', () => {
-          clearTimeout(fallback);
-          finish();
-        }, { once: true });
-      }, 200);
-    }
-  }, 240);
-}
-
 </script>
 </body>
 </html>

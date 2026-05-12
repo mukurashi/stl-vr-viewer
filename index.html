@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>STL/PDB VR Viewer - DNA Default</title>
+<title>STL/PDB VR Viewer - Protein Default</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
 
@@ -108,23 +108,23 @@
 <canvas id="canvas"></canvas>
 <div id="vr-divider"></div>
 <div id="scanline"></div>
-<div id="ui"><div class="topbar"><div class="logo">STL/PDB<span>::</span>VR<span> /</span> Viewer</div><div class="controls"><button class="btn" id="btn-reset">RESET</button><button class="btn" id="btn-wireframe">WIRE</button><button class="btn" id="btn-color">COLOR</button><button class="btn" id="btn-open">OPEN STL/PDB</button><button class="btn active" id="btn-vr">⬛ VR MODE</button></div></div></div>
+<div id="ui"><div class="topbar"><div class="logo">PROTEIN/STL<span>::</span>VR<span> /</span> Viewer</div><div class="controls"><button class="btn" id="btn-reset">RESET</button><button class="btn" id="btn-wireframe">WIRE</button><button class="btn" id="btn-color">COLOR</button><button class="btn" id="btn-open">OPEN STL/PDB</button><button class="btn active" id="btn-vr">⬛ VR MODE</button></div></div></div>
 <div id="dropzone" class="hidden"><div class="drop-box" id="drop-box"><div class="drop-icon"><svg viewBox="0 0 24 24" stroke-width="1.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div><div class="drop-title">STL または PDB ファイルを開く</div><div class="drop-sub">ここにファイルをドラッグ＆ドロップ<br>または下のボタンから選択</div><button class="file-btn" id="file-btn-open">ファイルを選択</button><input type="file" id="file-input" accept=".stl,.pdb,.STL,.PDB"></div></div>
 <div id="loading"><div class="loading-text">LOADING STRUCTURE</div><div class="loading-bar"><div class="loading-bar-inner"></div></div></div>
 <div id="vr-hint">TOUCH MOVE + PINCH ZOOM<br>スワイプで移動／ピンチで拡大縮小<br>マウスホイールも可 / ダブルタップでリセット</div>
 <button id="vr-exit">✕ EXIT VR</button>
-<div id="statusbar"><span id="status-file">DNA DOUBLE HELIX (DEFAULT)</span><span id="status-info">ATOMS: 98  BONDS: 142</span></div>
+<div id="statusbar"><span id="status-file">PROTEIN MODEL (DEFAULT)</span><span id="status-info">RESIDUES: 52  BONDS: 51</span></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ============================================================
-// PDB パーサー (原子 + 結合)
+// PDB パーサー (既存)
 // ============================================================
 function parsePDB(text) {
   const lines = text.split(/\r?\n/);
   const atoms = [];
   const conect = [];
-  const atomMap = new Map(); // serial_number -> index
+  const atomMap = new Map();
   for (let line of lines) {
     if (line.startsWith("ATOM") || line.startsWith("HETATM")) {
       const serial = parseInt(line.substring(6, 11).trim());
@@ -223,7 +223,7 @@ function parseASCII(text) {
 }
 
 // ============================================================
-// Three.js セットアップ (共通)
+// Three.js セットアップ
 // ============================================================
 const canvas = document.getElementById('canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -246,7 +246,7 @@ const solidMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 40
 const wireMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true, opacity: 0.6, transparent: true });
 let currentMode = 'color';
 let currentModelGroup = null;
-let currentModelType = null; // 'stl' or 'pdb'
+let currentModelType = null;
 
 function applyElevationColor(geo) {
   const pos = geo.attributes.position;
@@ -274,13 +274,8 @@ function finalizeModel(group, type, infoStr) {
   const center = new THREE.Vector3(); box.getCenter(center);
   const maxDim = Math.max(size.x, size.y, size.z);
   const scale = maxDim > 0 ? 2.0 / maxDim : 1;
-  if (type === 'stl') {
-    group.scale.setScalar(scale);
-    group.position.copy(center.clone().negate().multiplyScalar(scale));
-  } else {
-    group.scale.setScalar(scale);
-    group.position.copy(center.clone().negate().multiplyScalar(scale));
-  }
+  group.scale.setScalar(scale);
+  group.position.copy(center.clone().negate().multiplyScalar(scale));
   const newBox = new THREE.Box3().setFromObject(group);
   grid.position.y = newBox.min.y - 0.01;
   const finalSize = new THREE.Vector3(); newBox.getSize(finalSize);
@@ -397,7 +392,7 @@ canvas.addEventListener('mousemove', e => { if(!orbitState.isDragging || vrMode)
 canvas.addEventListener('wheel', e => { if(vrMode) return; e.preventDefault(); orbitState.radius = Math.max(0.5, Math.min(50, orbitState.radius + e.deltaY*0.01)); updateCameraFromOrbit(); }, { passive: false });
 
 // ============================================================
-// VR モード: タッチ移動 + ジャイロ視線 + ピンチ/ホイールズーム
+// VR モード (タッチ移動 + ジャイロ + ピンチ/ホイールズーム)
 // ============================================================
 let vrMode = false;
 let gyroQuat = new THREE.Quaternion();
@@ -616,89 +611,124 @@ window.addEventListener('resize', resize); resize();
 initVRTouch();
 
 // ============================================================
-// デフォルトDNAモデル（二重らせん）
+// デフォルトタンパク質モデル（カラフルで面白い構造）
 // ============================================================
-function generateDefaultDNA() {
+function generateDefaultProtein() {
   const group = new THREE.Group();
-  const radius = 1.2;
-  const heightTotal = 4.0;
-  const turns = 1.8;
-  const segments = 48;
-  const sphereRadius = 0.12;
-  const barRadius = 0.04;
-  const colorStrand1 = 0x33aaff;
-  const colorStrand2 = 0xff5533;
-  const colorBase = 0xcccc88;
-  const positions1 = [], positions2 = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const y = -heightTotal/2 + t * heightTotal;
-    const angle = t * Math.PI * 2 * turns;
-    const x1 = radius * Math.cos(angle);
-    const z1 = radius * Math.sin(angle);
-    const x2 = radius * Math.cos(angle + Math.PI);
-    const z2 = radius * Math.sin(angle + Math.PI);
-    positions1.push(new THREE.Vector3(x1, y, z1));
-    positions2.push(new THREE.Vector3(x2, y, z2));
+  // アルファヘリックス (赤系) と ベータシート (青系) を模した Cα トレース
+  const helixPositions = [];
+  const sheetPositions = [];
+  // ヘリックス1: らせん状
+  for (let i = 0; i <= 30; i++) {
+    const t = i / 30;
+    const angle = t * Math.PI * 2.5;
+    const r = 0.6;
+    const x = r * Math.cos(angle);
+    const z = r * Math.sin(angle);
+    const y = -1.2 + t * 2.4;
+    helixPositions.push(new THREE.Vector3(x, y, z));
   }
-  const sphereGeo = new THREE.SphereGeometry(sphereRadius, 24, 16);
-  for (let i = 0; i < positions1.length; i++) {
-    const mat1 = new THREE.MeshStandardMaterial({ color: colorStrand1, roughness: 0.3 });
-    const sphere1 = new THREE.Mesh(sphereGeo, mat1);
-    sphere1.position.copy(positions1[i]); group.add(sphere1);
-    const mat2 = new THREE.MeshStandardMaterial({ color: colorStrand2, roughness: 0.3 });
-    const sphere2 = new THREE.Mesh(sphereGeo, mat2);
-    sphere2.position.copy(positions2[i]); group.add(sphere2);
+  // シート領域: 折れ線 + いくつかの平行ストランド
+  const sheetPoints = [
+    [-0.8, -0.8, 0.6], [0, -0.6, 0.8], [0.8, -0.4, 0.5], [1.2, 0, 0.2], [1.0, 0.5, -0.2], [0.5, 0.9, -0.5], [-0.2, 1.0, -0.6], [-0.9, 0.7, -0.3], [-1.2, 0.2, 0.1], [-0.8, -0.3, 0.4]
+  ];
+  for (let p of sheetPoints) sheetPositions.push(new THREE.Vector3(p[0], p[1], p[2]));
+  // 結合用の球体（Cα を模す）と円柱
+  const sphereGeo = new THREE.SphereGeometry(0.1, 24, 16);
+  const cylinderGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 6);
+  // ヘリックス部分 (赤～オレンジ)
+  for (let i = 0; i < helixPositions.length; i++) {
+    const color = 0xff6666;
+    const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
+    const sphere = new THREE.Mesh(sphereGeo, mat);
+    sphere.position.copy(helixPositions[i]);
+    group.add(sphere);
+    if (i > 0) {
+      const p1 = helixPositions[i-1];
+      const p2 = helixPositions[i];
+      const delta = new THREE.Vector3().subVectors(p2, p1);
+      const len = delta.length();
+      const center = p1.clone().add(p2).multiplyScalar(0.5);
+      const cylinder = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0xff8888, roughness: 0.4 }));
+      cylinder.position.copy(center);
+      cylinder.scale.set(1, len, 1);
+      cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+      group.add(cylinder);
+    }
   }
-  const cylinderGeo = new THREE.CylinderGeometry(barRadius, barRadius, 1, 6);
-  for (let i = 0; i < positions1.length - 1; i++) {
-    const p1 = positions1[i], p2 = positions1[i+1];
-    const delta = new THREE.Vector3().subVectors(p2, p1);
-    const len = delta.length();
-    const center = p1.clone().add(p2).multiplyScalar(0.5);
-    const cyl = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: colorStrand1, roughness: 0.4 }));
-    cyl.position.copy(center); cyl.scale.set(1, len, 1);
-    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
-    group.add(cyl);
-    const p1b = positions2[i], p2b = positions2[i+1];
-    const deltab = new THREE.Vector3().subVectors(p2b, p1b);
-    const lenb = deltab.length();
-    const centerb = p1b.clone().add(p2b).multiplyScalar(0.5);
-    const cylb = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: colorStrand2, roughness: 0.4 }));
-    cylb.position.copy(centerb); cylb.scale.set(1, lenb, 1);
-    cylb.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), deltab.clone().normalize());
-    group.add(cylb);
+  // シート部分 (青～シアン)
+  for (let i = 0; i < sheetPositions.length; i++) {
+    const color = 0x66aaff;
+    const mat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3 });
+    const sphere = new THREE.Mesh(sphereGeo, mat);
+    sphere.position.copy(sheetPositions[i]);
+    group.add(sphere);
+    if (i > 0) {
+      const p1 = sheetPositions[i-1];
+      const p2 = sheetPositions[i];
+      const delta = new THREE.Vector3().subVectors(p2, p1);
+      const len = delta.length();
+      const center = p1.clone().add(p2).multiplyScalar(0.5);
+      const cylinder = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0x88ccff, roughness: 0.4 }));
+      cylinder.position.copy(center);
+      cylinder.scale.set(1, len, 1);
+      cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+      group.add(cylinder);
+    }
   }
-  const baseGeo = new THREE.CylinderGeometry(barRadius*0.8, barRadius*0.8, 1, 4);
-  for (let i = 0; i < positions1.length; i++) {
-    const p1 = positions1[i], p2 = positions2[i];
-    const delta = new THREE.Vector3().subVectors(p2, p1);
-    const len = delta.length();
-    const center = p1.clone().add(p2).multiplyScalar(0.5);
-    const cyl = new THREE.Mesh(baseGeo, new THREE.MeshStandardMaterial({ color: colorBase, roughness: 0.5 }));
-    cyl.position.copy(center); cyl.scale.set(1, len, 1);
-    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
-    group.add(cyl);
+  // ループ領域（緑系）をいくつか追加
+  const loopPoints = [
+    [0.5, -0.5, -0.8], [0.8, -0.2, -1.0], [0.6, 0.1, -0.9], [0.2, 0.3, -0.7], [-0.1, 0.2, -0.5]
+  ];
+  for (let i = 0; i < loopPoints.length; i++) {
+    const pos = new THREE.Vector3(loopPoints[i][0], loopPoints[i][1], loopPoints[i][2]);
+    const mat = new THREE.MeshStandardMaterial({ color: 0x66ff66, roughness: 0.3 });
+    const sphere = new THREE.Mesh(sphereGeo, mat);
+    sphere.position.copy(pos);
+    group.add(sphere);
+    if (i > 0) {
+      const p1 = new THREE.Vector3(loopPoints[i-1][0], loopPoints[i-1][1], loopPoints[i-1][2]);
+      const delta = new THREE.Vector3().subVectors(pos, p1);
+      const len = delta.length();
+      const center = p1.clone().add(pos).multiplyScalar(0.5);
+      const cylinder = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0x88ff88, roughness: 0.4 }));
+      cylinder.position.copy(center);
+      cylinder.scale.set(1, len, 1);
+      cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+      group.add(cylinder);
+    }
   }
-  group.userData = { atomCount: positions1.length * 2, bondCount: (positions1.length-1)*2 + positions1.length };
+  // いくつかのサイドチェーンを模した小さな球体
+  const sideColors = [0xffaa66, 0xff66aa, 0x66ffaa];
+  const sidePositions = [
+    [0.3, 0.5, 0.2], [-0.4, 0.7, -0.3], [0.7, -0.2, 0.9], [-0.6, -0.3, 1.1], [0.1, -0.9, 0.4]
+  ];
+  const smallSphereGeo = new THREE.SphereGeometry(0.07, 16, 12);
+  for (let i = 0; i < sidePositions.length; i++) {
+    const mat = new THREE.MeshStandardMaterial({ color: sideColors[i % sideColors.length], roughness: 0.2 });
+    const sphere = new THREE.Mesh(smallSphereGeo, mat);
+    sphere.position.set(sidePositions[i][0], sidePositions[i][1], sidePositions[i][2]);
+    group.add(sphere);
+  }
+  group.userData = { atomCount: helixPositions.length + sheetPositions.length + loopPoints.length + sidePositions.length, bondCount: (helixPositions.length-1)+(sheetPositions.length-1)+(loopPoints.length-1) };
   return group;
 }
 
-// 起動後にデフォルトDNAを表示
+// 起動後にデフォルトタンパク質を表示
 setTimeout(() => {
   try {
-    const dnaGroup = generateDefaultDNA();
-    finalizeModel(dnaGroup, 'pdb', 'DNA DOUBLE HELIX (DEFAULT)');
+    const proteinGroup = generateDefaultProtein();
+    finalizeModel(proteinGroup, 'pdb', 'PROTEIN MODEL (ALPHA/BETA)');
     applyDisplayMode('color');
-  } catch(e) { console.error('DNA生成エラー:', e); document.getElementById('dropzone').classList.remove('hidden'); }
+  } catch(e) { console.error('タンパク質生成エラー:', e); document.getElementById('dropzone').classList.remove('hidden'); }
 }, 3200);
 updateCameraFromOrbit();
 
-// 起動シーケンス (パトレイバー風)
+// 起動シーケンス (既存)
 (function(){
   const log=document.getElementById('boot-log'), fill=document.getElementById('boot-bar-fill'), phLbl=document.getElementById('boot-phase-label'), pctLbl=document.getElementById('boot-pct-label'), timeLbl=document.getElementById('boot-time'), ftrR=document.getElementById('boot-ftr-r'), boot=document.getElementById('boot');
   if(!boot) return;
-  const LINES=[['dim',' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],['dim',' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],['dim',''],['ok',' [BIOS] POST CHECK ........................ PASS'],['ok',' [MEM]  2048KB EXTENDED MEMORY ........... OK'],['ok',' [CPU]  MOTOROLA 68040 @ 40MHz ............ OK'],['ok',' [GPU]  FRAME BUFFER 640x480 .............. OK'],['ok',' [COM1] HELMET LINK MODULE ................ OK'],['warn',' [CAM]  HELMETCAM ................... OFFLINE'],['ok',' [NET]  POLICE RADIO UNIT ................. OK'],['dim',''],['hi',' LOADING KERNEL ...'],['ok',' [KERNEL] AV-OS 4.12 ...................... OK'],['ok',' [DRIVER] GYROSCOPE UNIT .................. OK'],['ok',' [DRIVER] STEREO OPTICS ................... OK'],['ok',' [DRIVER] 3D MESH RENDERER ................ OK'],['ok',' [DRIVER] MOTION SENSOR ................... OK'],['dim',''],['hi',' CHECKING LABOR STATUS ...'],['ok',' UNIT-1  AV-98 INGRAM ................ STANDBY'],['warn',' UNIT-2  AV-98 INGRAM .............. DAMAGED'],['ok',' HANNIBAL  TYPE-J9 BROCKEN ........... STANDBY'],['dim',''],['hi',' ALL SYSTEMS GO'],['ok',' LAUNCHING STL/PDB VISUALIZATION UNIT ...']];
+  const LINES=[['dim',' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],['dim',' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],['dim',''],['ok',' [BIOS] POST CHECK ........................ PASS'],['ok',' [MEM]  2048KB EXTENDED MEMORY ........... OK'],['ok',' [CPU]  MOTOROLA 68040 @ 40MHz ............ OK'],['ok',' [GPU]  FRAME BUFFER 640x480 .............. OK'],['ok',' [COM1] HELMET LINK MODULE ................ OK'],['warn',' [CAM]  HELMETCAM ................... OFFLINE'],['ok',' [NET]  POLICE RADIO UNIT ................. OK'],['dim',''],['hi',' LOADING KERNEL ...'],['ok',' [KERNEL] AV-OS 4.12 ...................... OK'],['ok',' [DRIVER] GYROSCOPE UNIT .................. OK'],['ok',' [DRIVER] STEREO OPTICS ................... OK'],['ok',' [DRIVER] 3D MESH RENDERER ................ OK'],['ok',' [DRIVER] MOTION SENSOR ................... OK'],['dim',''],['hi',' CHECKING LABOR STATUS ...'],['ok',' UNIT-1  AV-98 INGRAM ................ STANDBY'],['warn',' UNIT-2  AV-98 INGRAM .............. DAMAGED'],['ok',' HANNIBAL  TYPE-J9 BROCKEN ........... STANDBY'],['dim',''],['hi',' ALL SYSTEMS GO'],['ok',' LAUNCHING PROTEIN/STL VISUALIZER ...']];
   const PHASES=['BIOS / MEMORY CHECK','PERIPHERAL INIT','KERNEL LOAD','DRIVER SETUP','LABOR STATUS CHECK','LAUNCH'];
   const SEQ=[[0,0,2],[120,1,4],[220,2,5],[320,3,10,0],[440,4,14],[560,5,18],[680,6,22],[800,7,27,1],[920,8,31],[1040,9,35,undefined,'HELMETCAM: SEARCHING...'],[1160,10,38],[1280,11,42,2],[1400,12,48],[1520,13,54,3],[1640,14,59],[1760,15,64],[1880,16,69],[1980,17,72],[2080,18,76,4],[2200,19,82,undefined,'HELMETCAM: OFFLINE'],[2320,20,87],[2420,21,90],[2540,22,93],[2660,23,97,5],[2820,24,100]];
   const addLine=(type,text)=>{ const el=document.createElement('div'); el.className='bl '+type; el.textContent=text; log.appendChild(el); while(log.children.length>14) log.children[0].remove(); requestAnimationFrame(()=>el.classList.add('s')); };

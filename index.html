@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>毒タンパク質VRビューア - 確実表示版</title>
+<title>STL/PDB VR Viewer - Mouse Drag Move</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
 
@@ -31,12 +31,15 @@
   .topbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: linear-gradient(to bottom, rgba(8,12,16,.95), transparent); pointer-events: all; }
   .logo { font-family: var(--mono); font-size: 13px; letter-spacing: 3px; color: var(--accent); text-transform: uppercase; }
   .logo span { color: var(--dim); }
-  .controls { display: flex; gap: 8px; align-items: center; }
-  .btn { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; padding: 7px 14px; background: transparent; border: 1px solid var(--border); color: var(--dim); cursor: pointer; text-transform: uppercase; transition: all .15s; position: relative; overflow: hidden; }
-  .btn::before { content: ''; position: absolute; inset: 0; background: var(--accent); opacity: 0; transition: opacity .15s; }
+  .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; padding: 7px 14px; background: transparent; border: 1px solid var(--border); color: var(--dim); cursor: pointer; text-transform: uppercase; transition: all .15s; }
   .btn:hover { color: var(--accent); border-color: var(--accent); }
-  .btn:hover::before { opacity: .05; }
   .btn.active { color: var(--accent2); border-color: var(--accent2); }
+  .slider-container { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 20px; backdrop-filter: blur(4px); }
+  .slider-label { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; color: var(--accent); }
+  input[type="range"] { width: 120px; height: 2px; -webkit-appearance: none; background: var(--border); }
+  input[type="range"]:focus { outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer; }
   #dropzone { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; background: var(--bg); transition: opacity .3s; }
   #dropzone.hidden { opacity: 0; pointer-events: none; }
   .drop-box { width: min(480px, 90vw); border: 1px solid var(--border); padding: 48px 40px; text-align: center; position: relative; background: var(--surface); transition: border-color .2s; }
@@ -108,18 +111,20 @@
 <canvas id="canvas"></canvas>
 <div id="vr-divider"></div>
 <div id="scanline"></div>
-<div id="ui"><div class="topbar"><div class="logo">TOXIN<span>::</span>VR<span> /</span> Viewer</div><div class="controls"><button class="btn" id="btn-reset">RESET</button><button class="btn" id="btn-wireframe">WIRE</button><button class="btn" id="btn-color">COLOR</button><button class="btn" id="btn-open">OPEN STL/PDB</button><button class="btn active" id="btn-vr">⬛ VR MODE</button></div></div></div>
+<div id="ui"><div class="topbar"><div class="logo">STL/PDB<span>::</span>VR<span> /</span> Viewer</div><div class="controls"><button class="btn" id="btn-reset">RESET</button><button class="btn" id="btn-wireframe">WIRE</button><button class="btn" id="btn-color">COLOR</button><button class="btn" id="btn-open">OPEN STL/PDB</button><button class="btn active" id="btn-vr">⬛ VR MODE</button><div class="slider-container"><span class="slider-label">FOLD</span><input type="range" id="fold-slider" min="0" max="1" step="0.01" value="0"><span class="slider-label">UNFOLD</span><button id="btn-auto" class="btn" style="padding:4px 8px;">▶ AUTO</button></div></div></div></div>
 <div id="dropzone" class="hidden"><div class="drop-box" id="drop-box"><div class="drop-icon"><svg viewBox="0 0 24 24" stroke-width="1.2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div><div class="drop-title">STL または PDB ファイルを開く</div><div class="drop-sub">ここにファイルをドラッグ＆ドロップ<br>または下のボタンから選択</div><button class="file-btn" id="file-btn-open">ファイルを選択</button><input type="file" id="file-input" accept=".stl,.pdb,.STL,.PDB"></div></div>
 <div id="loading"><div class="loading-text">LOADING STRUCTURE</div><div class="loading-bar"><div class="loading-bar-inner"></div></div></div>
-<div id="vr-hint">TOUCH MOVE + PINCH ZOOM<br>スワイプで移動／ピンチで拡大縮小<br>マウスホイールも可 / ダブルタップでリセット</div>
+<div id="vr-hint">MOUSE DRAG MOVE + GYRO LOOK<br>左ドラッグで移動／右クリック＋ドラッグでパン<br>ホイールズーム / ダブルタップでリセット</div>
 <button id="vr-exit">✕ EXIT VR</button>
-<div id="statusbar"><span id="status-file">α-BUNGAROTOXIN (1JVB)</span><span id="status-info">RESIDUES: 52  DISULFIDES: 4</span></div>
+<div id="statusbar"><span id="status-file">DNA DOUBLE HELIX (DEFAULT)</span><span id="status-info">ATOMS: 98  BONDS: 142</span></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ============================================================
-// PDB パーサー (簡易)
+// PDB パーサー + フォールディングアニメーション用データ保持
 // ============================================================
+let currentPDBData = null; // { atoms, bonds, originalPositions, unfoldedPositions, group, sphereMeshes, cylinderMeshes }
+
 function parsePDB(text) {
   const lines = text.split(/\r?\n/);
   const atoms = [];
@@ -183,8 +188,85 @@ function getElementColor(element) {
   return 0x88aaff;
 }
 
+function computeUnfoldedPositions(atoms) {
+  let center = new THREE.Vector3(0,0,0);
+  for (let a of atoms) center.add(new THREE.Vector3(a.x, a.y, a.z));
+  center.divideScalar(atoms.length);
+  const unfolded = [];
+  for (let a of atoms) {
+    const orig = new THREE.Vector3(a.x, a.y, a.z);
+    const dir = orig.clone().sub(center).normalize();
+    const dist = orig.distanceTo(center);
+    const newDist = dist * (1.5 + Math.random() * 1.0);
+    const radial = dir.clone().multiplyScalar(newDist);
+    const noise = new THREE.Vector3(
+      (Math.random() - 0.5) * 1.2,
+      (Math.random() - 0.5) * 1.2,
+      (Math.random() - 0.5) * 1.2
+    );
+    const pos = radial.add(noise);
+    unfolded.push(pos);
+  }
+  return unfolded;
+}
+
+function buildPDBModel(pdbData, unfoldedPositions) {
+  const { atoms, bonds } = pdbData;
+  const group = new THREE.Group();
+  const sphereMeshes = [];
+  const cylinderMeshes = [];
+  const sphereGeo = new THREE.SphereGeometry(0.12, 24, 16);
+  for (let i = 0; i < atoms.length; i++) {
+    const atom = atoms[i];
+    const color = getElementColor(atom.element);
+    const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.1 });
+    const sphere = new THREE.Mesh(sphereGeo, material);
+    sphere.position.set(atom.x, atom.y, atom.z);
+    group.add(sphere);
+    sphereMeshes.push(sphere);
+  }
+  const cylinderGeo = new THREE.CylinderGeometry(0.04, 0.04, 1, 6);
+  for (let [i1, i2] of bonds) {
+    const p1 = new THREE.Vector3(atoms[i1].x, atoms[i1].y, atoms[i1].z);
+    const p2 = new THREE.Vector3(atoms[i2].x, atoms[i2].y, atoms[i2].z);
+    const delta = new THREE.Vector3().subVectors(p2, p1);
+    const length = delta.length();
+    const center = p1.clone().add(p2).multiplyScalar(0.5);
+    const cylinder = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0xccccaa, roughness: 0.4 }));
+    cylinder.position.copy(center);
+    cylinder.scale.set(1, length, 1);
+    cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+    group.add(cylinder);
+    cylinderMeshes.push({ mesh: cylinder, i1, i2, origLength: length });
+  }
+  return { group, sphereMeshes, cylinderMeshes };
+}
+
+function updateFolding(factor) {
+  if (!currentPDBData || !currentPDBData.sphereMeshes) return;
+  const { atoms, originalPositions, unfoldedPositions, sphereMeshes, cylinderMeshes } = currentPDBData;
+  for (let i = 0; i < sphereMeshes.length; i++) {
+    const orig = originalPositions[i];
+    const unfolded = unfoldedPositions[i];
+    const x = orig.x * (1 - factor) + unfolded.x * factor;
+    const y = orig.y * (1 - factor) + unfolded.y * factor;
+    const z = orig.z * (1 - factor) + unfolded.z * factor;
+    sphereMeshes[i].position.set(x, y, z);
+  }
+  for (let cyl of cylinderMeshes) {
+    const p1 = sphereMeshes[cyl.i1].position;
+    const p2 = sphereMeshes[cyl.i2].position;
+    const delta = new THREE.Vector3().subVectors(p2, p1);
+    const length = delta.length();
+    const center = p1.clone().add(p2).multiplyScalar(0.5);
+    cyl.mesh.position.copy(center);
+    cyl.mesh.scale.set(1, length, 1);
+    cyl.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+  }
+}
+
 // ============================================================
-// STL Parser
+// STL Parser (既存)
 // ============================================================
 function parseSTL(buffer) {
   const text = new TextDecoder().decode(new Uint8Array(buffer, 0, 256));
@@ -230,32 +312,26 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setClearColor(0x080c10);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x080c10);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
-camera.position.set(3, 2, 4);
-camera.lookAt(0, 0, 0);
+scene.fog = new THREE.FogExp2(0x080c10, 0.015);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.01, 1000);
+camera.position.set(0, 1.5, 4);
 const camL = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
 const camR = new THREE.PerspectiveCamera(70, 1, 0.01, 1000);
 const IPD = 0.064;
-const ambientLight = new THREE.AmbientLight(0x404060, 1.5);
+const ambientLight = new THREE.AmbientLight(0x1a2e44, 1.2);
 scene.add(ambientLight);
-const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
-mainLight.position.set(2, 5, 3);
-scene.add(mainLight);
-const fillLight = new THREE.PointLight(0x4466cc, 0.5);
-fillLight.position.set(-2, 1, -3);
-scene.add(fillLight);
-const backLight = new THREE.PointLight(0xffaa66, 0.4);
-backLight.position.set(0, 1, -4);
-scene.add(backLight);
-const grid = new THREE.GridHelper(20, 40, 0x1a2e44, 0x0d1520);
-scene.add(grid);
+const dirLight1 = new THREE.DirectionalLight(0x00e5ff, 1.0); dirLight1.position.set(5,8,5); scene.add(dirLight1);
+const dirLight2 = new THREE.DirectionalLight(0xff6b35, 0.4); dirLight2.position.set(-5,2,-5); scene.add(dirLight2);
+const grid = new THREE.GridHelper(20, 40, 0x1a2e44, 0x0d1520); scene.add(grid);
 
 const solidMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 40, specular: new THREE.Color(0x223344) });
 const wireMat = new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true, opacity: 0.6, transparent: true });
 let currentMode = 'color';
 let currentModelGroup = null;
 let currentModelType = null;
+let autoAnimInterval = null;
+let autoAnimDir = 1;
+let foldSlider = document.getElementById('fold-slider');
 
 function applyElevationColor(geo) {
   const pos = geo.attributes.position;
@@ -273,95 +349,60 @@ function applyElevationColor(geo) {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 
-function disposeGroup(group) {
-  if (!group) return;
-  group.traverse((obj) => {
-    if (obj.isMesh) {
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) obj.material.dispose();
-    }
-  });
-  scene.remove(group);
-}
-
-function finalizeModel(group, type, infoStr, subInfo = '') {
-  if (currentModelGroup) disposeGroup(currentModelGroup);
+function finalizeModel(group, type, infoStr, extraData = null) {
+  if (currentModelGroup) scene.remove(currentModelGroup);
   currentModelGroup = group;
   currentModelType = type;
   scene.add(group);
-  // バウンディングボックスを強制計算
-  group.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(group);
-  const size = new THREE.Vector3();
-  box.getSize(size);
-  const center = new THREE.Vector3();
-  box.getCenter(center);
-  // スケール調整（サイズがゼロの場合のフォールバック）
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
   const maxDim = Math.max(size.x, size.y, size.z);
-  if (maxDim > 0.01) {
-    const scale = 2.2 / maxDim;
-    group.scale.setScalar(scale);
-    group.position.copy(center.clone().negate().multiplyScalar(scale));
-  } else {
-    // フォールバック: 適当なスケール
-    group.scale.setScalar(1);
-    group.position.set(0, 0, 0);
-  }
-  // グリッド位置調整
+  const scale = maxDim > 0 ? 2.0 / maxDim : 1;
+  group.scale.setScalar(scale);
+  group.position.copy(center.clone().negate().multiplyScalar(scale));
   const newBox = new THREE.Box3().setFromObject(group);
-  grid.position.y = newBox.min.y - 0.1;
-  // カメラ距離設定（通常モード用）
-  const finalSize = new THREE.Vector3();
-  newBox.getSize(finalSize);
-  const dist = Math.max(1.5, finalSize.length() * 1.4);
-  orbitState.radius = dist;
-  orbitState.target.set(0, 0, 0);
+  grid.position.y = newBox.min.y - 0.01;
+  const finalSize = new THREE.Vector3(); newBox.getSize(finalSize);
+  orbitState.radius = finalSize.length() * 1.2;
+  orbitState.target.set(0,0,0);
   updateCameraFromOrbit();
-  // ステータス表示
   document.getElementById('status-file').textContent = infoStr;
   if (type === 'stl') {
     const fc = group.userData.faceCount || 0;
     document.getElementById('status-info').textContent = `FACES: ${fc.toLocaleString()}`;
+    foldSlider.disabled = true;
+    if (autoAnimInterval) clearInterval(autoAnimInterval);
   } else {
-    document.getElementById('status-info').textContent = subInfo || `ATOMS: ${group.userData.atomCount || 0}  BONDS: ${group.userData.bondCount || 0}`;
+    document.getElementById('status-info').textContent = `ATOMS: ${group.userData.atomCount || 0}  BONDS: ${group.userData.bondCount || 0}`;
+    foldSlider.disabled = false;
   }
   document.getElementById('dropzone').classList.add('hidden');
   applyDisplayMode(currentMode);
-  // デバッグ確認用（必要ならコンソールで確認）
-  console.log('Model loaded:', infoStr, 'size:', finalSize, 'dist:', dist);
 }
 
 function loadPDBFromText(text, filename) {
   document.getElementById('loading').classList.add('show');
   setTimeout(() => {
     try {
-      const { atoms, bonds } = parsePDB(text);
-      if (atoms.length === 0) throw new Error("No atoms found");
-      const group = new THREE.Group();
-      const sphereGeo = new THREE.SphereGeometry(0.12, 24, 16);
-      for (let atom of atoms) {
-        const color = getElementColor(atom.element);
-        const material = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.1 });
-        const sphere = new THREE.Mesh(sphereGeo, material);
-        sphere.position.set(atom.x, atom.y, atom.z);
-        group.add(sphere);
-      }
-      const cylinderGeo = new THREE.CylinderGeometry(0.04, 0.04, 1, 6);
-      for (let [i1, i2] of bonds) {
-        const p1 = new THREE.Vector3(atoms[i1].x, atoms[i1].y, atoms[i1].z);
-        const p2 = new THREE.Vector3(atoms[i2].x, atoms[i2].y, atoms[i2].z);
-        const delta = new THREE.Vector3().subVectors(p2, p1);
-        const length = delta.length();
-        if (length > 2.5) continue;
-        const center = p1.clone().add(p2).multiplyScalar(0.5);
-        const cylinder = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0xccccaa, roughness: 0.4 }));
-        cylinder.position.copy(center);
-        cylinder.scale.set(1, length, 1);
-        cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
-        group.add(cylinder);
-      }
-      group.userData = { atomCount: atoms.length, bondCount: bonds.length };
-      finalizeModel(group, 'pdb', filename.toUpperCase(), `ATOMS: ${atoms.length}  BONDS: ${bonds.length}`);
+      const pdbData = parsePDB(text);
+      if (pdbData.atoms.length === 0) throw new Error("No atoms found");
+      const originalPositions = pdbData.atoms.map(a => new THREE.Vector3(a.x, a.y, a.z));
+      const unfoldedPositions = computeUnfoldedPositions(pdbData.atoms);
+      const { group, sphereMeshes, cylinderMeshes } = buildPDBModel(pdbData, unfoldedPositions);
+      group.userData = { atomCount: pdbData.atoms.length, bondCount: pdbData.bonds.length };
+      currentPDBData = {
+        atoms: pdbData.atoms,
+        bonds: pdbData.bonds,
+        originalPositions,
+        unfoldedPositions,
+        group,
+        sphereMeshes,
+        cylinderMeshes
+      };
+      finalizeModel(group, 'pdb', filename.toUpperCase());
+      foldSlider.value = 0;
+      updateFolding(0);
       applyDisplayMode('color');
     } catch(e) { alert('PDB読み込みエラー: ' + e.message); console.error(e); }
     document.getElementById('loading').classList.remove('show');
@@ -396,8 +437,9 @@ function loadSTLBuffer(buffer, filename) {
       wireMesh.visible = false;
       group.add(solidMesh, wireMesh);
       group.userData = { faceCount };
-      finalizeModel(group, 'stl', filename.toUpperCase(), `FACES: ${faceCount.toLocaleString()}`);
+      finalizeModel(group, 'stl', filename.toUpperCase());
       applyDisplayMode(currentMode);
+      currentPDBData = null;
     } catch(e) { alert('STL読み込みエラー: '+e.message); console.error(e); }
     document.getElementById('loading').classList.remove('show');
   }, 50);
@@ -415,8 +457,8 @@ function applyDisplayMode(mode) {
   else { solid.visible = true; wire.visible = false; solid.material.vertexColors = false; solid.material.color.set(0x00e5ff); solid.material.needsUpdate = true; }
 }
 
-// 通常モード用オービット
-const orbitState = { theta: 0.5, phi: Math.PI/3, radius: 5, target: new THREE.Vector3(0,0,0), isDragging: false, lastX:0, lastY:0 };
+// 通常モードオービット + マウスパン
+const orbitState = { theta: 0.5, phi: Math.PI/3, radius: 5, target: new THREE.Vector3(0,0,0), isDragging: false, lastX:0, lastY:0, isPanning: false };
 function updateCameraFromOrbit() {
   const s = orbitState;
   const x = s.radius * Math.sin(s.phi) * Math.sin(s.theta);
@@ -425,13 +467,84 @@ function updateCameraFromOrbit() {
   camera.position.set(s.target.x + x, s.target.y + y, s.target.z + z);
   camera.lookAt(s.target);
 }
-canvas.addEventListener('mousedown', e => { orbitState.isDragging = true; orbitState.lastX = e.clientX; orbitState.lastY = e.clientY; });
-canvas.addEventListener('mouseup', () => { orbitState.isDragging = false; });
-canvas.addEventListener('mousemove', e => { if(!orbitState.isDragging || vrMode) return; const dx = e.clientX - orbitState.lastX, dy = e.clientY - orbitState.lastY; orbitState.theta -= dx*0.005; orbitState.phi = Math.max(0.05, Math.min(Math.PI-0.05, orbitState.phi + dy*0.005)); orbitState.lastX = e.clientX; orbitState.lastY = e.clientY; updateCameraFromOrbit(); });
-canvas.addEventListener('wheel', e => { if(vrMode) return; e.preventDefault(); orbitState.radius = Math.max(0.5, Math.min(50, orbitState.radius + e.deltaY*0.01)); updateCameraFromOrbit(); }, { passive: false });
+canvas.addEventListener('mousedown', (e) => {
+  if (vrMode) {
+    if (e.button === 0) { // 左ボタン: VRモード中の移動
+      orbitState.isDragging = true;
+      orbitState.lastX = e.clientX;
+      orbitState.lastY = e.clientY;
+      e.preventDefault();
+    }
+  } else {
+    if (e.button === 0) { // 左ボタン: オービット回転
+      orbitState.isDragging = true;
+      orbitState.lastX = e.clientX;
+      orbitState.lastY = e.clientY;
+      e.preventDefault();
+    } else if (e.button === 2) { // 右ボタン: パン
+      orbitState.isPanning = true;
+      orbitState.lastX = e.clientX;
+      orbitState.lastY = e.clientY;
+      e.preventDefault();
+    }
+  }
+});
+canvas.addEventListener('mouseup', () => { orbitState.isDragging = false; orbitState.isPanning = false; });
+canvas.addEventListener('mousemove', (e) => {
+  if (!vrMode) {
+    if (orbitState.isDragging) {
+      const dx = e.clientX - orbitState.lastX;
+      const dy = e.clientY - orbitState.lastY;
+      orbitState.theta -= dx * 0.005;
+      orbitState.phi = Math.max(0.05, Math.min(Math.PI-0.05, orbitState.phi + dy * 0.005));
+      orbitState.lastX = e.clientX;
+      orbitState.lastY = e.clientY;
+      updateCameraFromOrbit();
+    } else if (orbitState.isPanning && currentModelGroup) {
+      const dx = e.clientX - orbitState.lastX;
+      const dy = e.clientY - orbitState.lastY;
+      // パン: target を移動 (カメラの右方向と上方向に合わせて)
+      const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+      const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+      const up = new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);
+      const deltaPos = right.clone().multiplyScalar(-dx * 0.005).add(up.clone().multiplyScalar(dy * 0.005));
+      orbitState.target.add(deltaPos);
+      orbitState.lastX = e.clientX;
+      orbitState.lastY = e.clientY;
+      updateCameraFromOrbit();
+    }
+  } else {
+    if (orbitState.isDragging) { // VRモード中のマウス左ドラッグで camOffset 移動
+      const dx = e.clientX - orbitState.lastX;
+      const dy = e.clientY - orbitState.lastY;
+      // カメラの右方向と上方向に合わせて移動 (ジャイロの向きを考慮)
+      const viewDir = new THREE.Vector3(0,0,-1).applyQuaternion(gyroQuat);
+      const right = new THREE.Vector3(1,0,0).applyQuaternion(gyroQuat);
+      const up = new THREE.Vector3(0,1,0).applyQuaternion(gyroQuat);
+      camOffset.x += dx * 0.008;
+      camOffset.z += dy * 0.008;
+      camOffset.x = Math.min(3.0, Math.max(-3.0, camOffset.x));
+      camOffset.z = Math.min(8.0, Math.max(0.3, camOffset.z));
+      orbitState.lastX = e.clientX;
+      orbitState.lastY = e.clientY;
+    }
+  }
+});
+canvas.addEventListener('wheel', (e) => {
+  if (vrMode) {
+    e.preventDefault();
+    camOffset.z += e.deltaY * 0.01;
+    camOffset.z = Math.min(8.0, Math.max(0.3, camOffset.z));
+  } else {
+    e.preventDefault();
+    orbitState.radius = Math.max(0.5, Math.min(50, orbitState.radius + e.deltaY * 0.01));
+    updateCameraFromOrbit();
+  }
+}, { passive: false });
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ============================================================
-// VR モード (タッチ移動 + ジャイロ + ピンチ/ホイールズーム)
+// VR モード (タッチ移動 + ジャイロ + マウスドラッグ移動)
 // ============================================================
 let vrMode = false;
 let gyroQuat = new THREE.Quaternion();
@@ -486,13 +599,12 @@ function initVRTouch() {
   }, { passive: false });
   cvs.addEventListener('touchend', () => { vrTouch.active = false; pinchStartDist = 0; });
 }
-canvas.addEventListener('wheel', (e) => { if (!vrMode) return; e.preventDefault(); camOffset.z += e.deltaY * 0.01; camOffset.z = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, camOffset.z)); }, { passive: false });
 
 function resetPosition() {
   if (!currentModelGroup) return;
   const box = new THREE.Box3().setFromObject(currentModelGroup);
   const size = new THREE.Vector3(); box.getSize(size);
-  camOffset.set(0, 0, Math.max(1.0, size.length() * 1.2));
+  camOffset.set(0, 0, size.length() * 1.2);
 }
 function onGyro(e) {
   if (!vrMode) return;
@@ -533,7 +645,7 @@ function enterVR() {
     document.body.classList.add('vr-mode');
     const box = new THREE.Box3().setFromObject(currentModelGroup);
     const size = new THREE.Vector3(); box.getSize(size);
-    const baseDist = Math.max(1.0, size.length() * 1.2);
+    const baseDist = size.length() * 1.2;
     camOffset.set(0, 0, baseDist);
     orbitState.target.copy(new THREE.Vector3());
     vrBaseQuat = null;
@@ -608,7 +720,7 @@ document.getElementById('btn-reset').addEventListener('click', ()=>{
   if(!currentModelGroup) return;
   orbitState.theta=0.5; orbitState.phi=Math.PI/3; orbitState.target.set(0,0,0);
   const box=new THREE.Box3().setFromObject(currentModelGroup); const sz=new THREE.Vector3(); box.getSize(sz);
-  orbitState.radius=Math.max(1.0, sz.length()*1.4); updateCameraFromOrbit();
+  orbitState.radius=sz.length()*1.4; updateCameraFromOrbit();
   resetPosition();
 });
 document.getElementById('btn-wireframe').addEventListener('click', function(){ const next = currentMode==='wire'?'color':'wire'; applyDisplayMode(next); this.classList.toggle('active', next==='wire'); });
@@ -649,98 +761,115 @@ function resize(){ const w=window.innerWidth, h=window.innerHeight; renderer.set
 window.addEventListener('resize', resize); resize();
 initVRTouch();
 
+// フォールディングスライダーと自動アニメーション
+foldSlider.addEventListener('input', (e) => {
+  if (autoAnimInterval) clearInterval(autoAnimInterval);
+  const val = parseFloat(e.target.value);
+  updateFolding(val);
+});
+document.getElementById('btn-auto').addEventListener('click', () => {
+  if (autoAnimInterval) {
+    clearInterval(autoAnimInterval);
+    autoAnimInterval = null;
+    document.getElementById('btn-auto').textContent = '▶ AUTO';
+  } else {
+    autoAnimDir = 1;
+    autoAnimInterval = setInterval(() => {
+      let val = parseFloat(foldSlider.value);
+      val += 0.01 * autoAnimDir;
+      if (val >= 1) { val = 1; autoAnimDir = -1; }
+      if (val <= 0) { val = 0; autoAnimDir = 1; }
+      foldSlider.value = val;
+      updateFolding(val);
+    }, 50);
+    document.getElementById('btn-auto').textContent = '⏸ STOP';
+  }
+});
+
 // ============================================================
-// 実在する生物毒タンパク質モデル (α-ブンガロトキシン風, PDB 1JVB)
-// 確実に表示されるよう、球体の半径を大きくし色を明るく
+// デフォルトDNAモデル（二重らせん）
 // ============================================================
-function generateRealisticToxin() {
+function generateDefaultDNA() {
   const group = new THREE.Group();
-  // Cαトレース座標 (実際の1JVBのCαをベース)
-  const caPositions = [
-    [ 0.00,  1.20,  0.00], [ 0.35,  1.05,  0.42], [ 0.55,  0.70,  0.85], [ 0.40,  0.30,  1.05],
-    [ 0.00,  0.00,  1.20], [-0.42, -0.32,  1.02], [-0.58, -0.72,  0.82], [-0.36, -1.06,  0.40],
-    [ 0.00, -1.22,  0.00], [ 0.36, -1.06, -0.40], [ 0.58, -0.72, -0.82], [ 0.42, -0.32, -1.02],
-    [ 0.08,  0.08, -1.22], [-0.18,  0.48, -1.12], [-0.48,  0.88, -0.88], [-0.68,  1.18, -0.48],
-    [-0.78,  1.34,  0.00], [-0.68,  1.18,  0.48], [-0.48,  0.88,  0.88], [-0.18,  0.48,  1.12],
-    [ 0.08,  0.08,  1.22], [ 0.42, -0.32,  1.02], [ 0.72, -0.72,  0.72], [ 0.92, -1.02,  0.32],
-    [ 1.06, -1.18,  0.00], [ 1.24, -0.98, -0.44], [ 1.38, -0.58, -0.84], [ 1.44, -0.12, -1.08],
-    [ 1.34,  0.32, -1.12], [ 1.08,  0.72, -0.92], [ 0.72,  1.02, -0.62], [ 0.34,  1.22, -0.22],
-    [ 0.00,  1.34,  0.00], [-0.34,  1.22,  0.22], [-0.72,  1.02,  0.62], [-1.08,  0.72,  0.92],
-    [-1.34,  0.32,  1.12], [-1.44, -0.12,  1.08], [-1.38, -0.58,  0.84], [-1.24, -0.98,  0.44],
-    [-1.06, -1.18,  0.00], [-0.76, -1.38, -0.38], [-0.36, -1.52, -0.78], [ 0.00, -1.58, -1.02],
-    [ 0.38, -1.48, -1.12], [ 0.82, -1.22, -1.02], [ 1.18, -0.86, -0.78], [ 1.38, -0.42, -0.38],
-    [ 1.44,  0.00,  0.00], [ 1.38,  0.42,  0.38], [ 1.18,  0.86,  0.78], [ 0.82,  1.22,  1.02],
-    [ 0.38,  1.48,  1.12], [ 0.00,  1.58,  1.02], [-0.36,  1.52,  0.78], [-0.76,  1.38,  0.38]
-  ];
-  const colors = [];
-  for (let i = 0; i < caPositions.length; i++) {
-    if (i < 12) colors.push(0x66ff66);      // 明るい緑
-    else if (i < 24) colors.push(0xff6666); // 赤
-    else if (i < 38) colors.push(0x66aaff); // 青
-    else colors.push(0x88ff88);              // 明るい緑
+  const radius = 1.2;
+  const heightTotal = 4.0;
+  const turns = 1.8;
+  const segments = 48;
+  const sphereRadius = 0.12;
+  const barRadius = 0.04;
+  const colorStrand1 = 0x33aaff;
+  const colorStrand2 = 0xff5533;
+  const colorBase = 0xcccc88;
+  const positions1 = [], positions2 = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const y = -heightTotal/2 + t * heightTotal;
+    const angle = t * Math.PI * 2 * turns;
+    const x1 = radius * Math.cos(angle);
+    const z1 = radius * Math.sin(angle);
+    const x2 = radius * Math.cos(angle + Math.PI);
+    const z2 = radius * Math.sin(angle + Math.PI);
+    positions1.push(new THREE.Vector3(x1, y, z1));
+    positions2.push(new THREE.Vector3(x2, y, z2));
   }
-  const disulfideIndices = [5, 18, 30, 45];
-  // 球体を少し大きくして見やすく
-  const sphereGeo = new THREE.SphereGeometry(0.16, 32, 24);
-  const cylinderGeo = new THREE.CylinderGeometry(0.05, 0.05, 1, 8);
-  for (let i = 0; i < caPositions.length; i++) {
-    const pos = new THREE.Vector3(caPositions[i][0], caPositions[i][1], caPositions[i][2]);
-    const material = new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.2, metalness: 0.15, emissive: 0x220000 });
-    const sphere = new THREE.Mesh(sphereGeo, material);
-    sphere.position.copy(pos);
-    group.add(sphere);
-    if (i > 0) {
-      const p1 = new THREE.Vector3(caPositions[i-1][0], caPositions[i-1][1], caPositions[i-1][2]);
-      const delta = new THREE.Vector3().subVectors(pos, p1);
-      const len = delta.length();
-      if (len < 1.6 && len > 0.05) {
-        const center = p1.clone().add(pos).multiplyScalar(0.5);
-        const cylinder = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0xccaa88, roughness: 0.5 }));
-        cylinder.position.copy(center);
-        cylinder.scale.set(1, len, 1);
-        cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
-        group.add(cylinder);
-      }
-    }
+  const sphereGeo = new THREE.SphereGeometry(sphereRadius, 24, 16);
+  for (let i = 0; i < positions1.length; i++) {
+    const mat1 = new THREE.MeshStandardMaterial({ color: colorStrand1, roughness: 0.3 });
+    const sphere1 = new THREE.Mesh(sphereGeo, mat1);
+    sphere1.position.copy(positions1[i]); group.add(sphere1);
+    const mat2 = new THREE.MeshStandardMaterial({ color: colorStrand2, roughness: 0.3 });
+    const sphere2 = new THREE.Mesh(sphereGeo, mat2);
+    sphere2.position.copy(positions2[i]); group.add(sphere2);
   }
-  const sulfurMat = new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0x442200, roughness: 0.2 });
-  for (let idx of disulfideIndices) {
-    if (idx < caPositions.length) {
-      const pos = new THREE.Vector3(caPositions[idx][0], caPositions[idx][1], caPositions[idx][2]);
-      const ssphere = new THREE.Mesh(new THREE.SphereGeometry(0.18, 24, 18), sulfurMat);
-      ssphere.position.copy(pos);
-      group.add(ssphere);
-    }
+  const cylinderGeo = new THREE.CylinderGeometry(barRadius, barRadius, 1, 6);
+  for (let i = 0; i < positions1.length - 1; i++) {
+    const p1 = positions1[i], p2 = positions1[i+1];
+    const delta = new THREE.Vector3().subVectors(p2, p1);
+    const len = delta.length();
+    const center = p1.clone().add(p2).multiplyScalar(0.5);
+    const cyl = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: colorStrand1, roughness: 0.4 }));
+    cyl.position.copy(center); cyl.scale.set(1, len, 1);
+    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+    group.add(cyl);
+    const p1b = positions2[i], p2b = positions2[i+1];
+    const deltab = new THREE.Vector3().subVectors(p2b, p1b);
+    const lenb = deltab.length();
+    const centerb = p1b.clone().add(p2b).multiplyScalar(0.5);
+    const cylb = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: colorStrand2, roughness: 0.4 }));
+    cylb.position.copy(centerb); cylb.scale.set(1, lenb, 1);
+    cylb.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), deltab.clone().normalize());
+    group.add(cylb);
   }
-  group.userData = { atomCount: caPositions.length + disulfideIndices.length, bondCount: caPositions.length - 1 };
+  const baseGeo = new THREE.CylinderGeometry(barRadius*0.8, barRadius*0.8, 1, 4);
+  for (let i = 0; i < positions1.length; i++) {
+    const p1 = positions1[i], p2 = positions2[i];
+    const delta = new THREE.Vector3().subVectors(p2, p1);
+    const len = delta.length();
+    const center = p1.clone().add(p2).multiplyScalar(0.5);
+    const cyl = new THREE.Mesh(baseGeo, new THREE.MeshStandardMaterial({ color: colorBase, roughness: 0.5 }));
+    cyl.position.copy(center); cyl.scale.set(1, len, 1);
+    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), delta.clone().normalize());
+    group.add(cyl);
+  }
+  group.userData = { atomCount: positions1.length * 2, bondCount: (positions1.length-1)*2 + positions1.length };
   return group;
 }
 
-// 起動後にデフォルト毒タンパク質を表示
 setTimeout(() => {
   try {
-    const toxinGroup = generateRealisticToxin();
-    finalizeModel(toxinGroup, 'pdb', 'α-BUNGAROTOXIN (1JVB BASED)', 'RESIDUES: 52  DISULFIDES: 4');
+    const dnaGroup = generateDefaultDNA();
+    finalizeModel(dnaGroup, 'pdb', 'DNA DOUBLE HELIX (DEFAULT)');
+    foldSlider.disabled = true;
     applyDisplayMode('color');
-  } catch(e) { 
-    console.error('毒タンパク質生成エラー:', e); 
-    document.getElementById('dropzone').classList.remove('hidden');
-    // フォールバックとして単純な球を表示
-    const fallbackGroup = new THREE.Group();
-    const geo = new THREE.SphereGeometry(0.8, 32, 32);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xff6600 });
-    const sphere = new THREE.Mesh(geo, mat);
-    fallbackGroup.add(sphere);
-    finalizeModel(fallbackGroup, 'pdb', 'FALLBACK MODEL', 'SIMPLE SPHERE');
-  }
+  } catch(e) { console.error('DNA生成エラー:', e); document.getElementById('dropzone').classList.remove('hidden'); }
 }, 3200);
 updateCameraFromOrbit();
 
-// 起動シーケンス
+// 起動シーケンス (パトレイバー風)
 (function(){
   const log=document.getElementById('boot-log'), fill=document.getElementById('boot-bar-fill'), phLbl=document.getElementById('boot-phase-label'), pctLbl=document.getElementById('boot-pct-label'), timeLbl=document.getElementById('boot-time'), ftrR=document.getElementById('boot-ftr-r'), boot=document.getElementById('boot');
   if(!boot) return;
-  const LINES=[['dim',' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],['dim',' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],['dim',''],['ok',' [BIOS] POST CHECK ........................ PASS'],['ok',' [MEM]  2048KB EXTENDED MEMORY ........... OK'],['ok',' [CPU]  MOTOROLA 68040 @ 40MHz ............ OK'],['ok',' [GPU]  FRAME BUFFER 640x480 .............. OK'],['ok',' [COM1] HELMET LINK MODULE ................ OK'],['warn',' [CAM]  HELMETCAM ................... OFFLINE'],['ok',' [NET]  POLICE RADIO UNIT ................. OK'],['dim',''],['hi',' LOADING KERNEL ...'],['ok',' [KERNEL] AV-OS 4.12 ...................... OK'],['ok',' [DRIVER] GYROSCOPE UNIT .................. OK'],['ok',' [DRIVER] STEREO OPTICS ................... OK'],['ok',' [DRIVER] 3D MESH RENDERER ................ OK'],['ok',' [DRIVER] MOTION SENSOR ................... OK'],['dim',''],['hi',' CHECKING LABOR STATUS ...'],['ok',' UNIT-1  AV-98 INGRAM ................ STANDBY'],['warn',' UNIT-2  AV-98 INGRAM .............. DAMAGED'],['ok',' HANNIBAL  TYPE-J9 BROCKEN ........... STANDBY'],['dim',''],['hi',' ALL SYSTEMS GO'],['ok',' LAUNCHING TOXIN VISUALIZER ...']];
+  const LINES=[['dim',' SV2 LABOR CONTROL SYSTEM  ver.4.12.0'],['dim',' COPYRIGHT (C) 1999 TOKYO MET. POLICE DEPT.'],['dim',''],['ok',' [BIOS] POST CHECK ........................ PASS'],['ok',' [MEM]  2048KB EXTENDED MEMORY ........... OK'],['ok',' [CPU]  MOTOROLA 68040 @ 40MHz ............ OK'],['ok',' [GPU]  FRAME BUFFER 640x480 .............. OK'],['ok',' [COM1] HELMET LINK MODULE ................ OK'],['warn',' [CAM]  HELMETCAM ................... OFFLINE'],['ok',' [NET]  POLICE RADIO UNIT ................. OK'],['dim',''],['hi',' LOADING KERNEL ...'],['ok',' [KERNEL] AV-OS 4.12 ...................... OK'],['ok',' [DRIVER] GYROSCOPE UNIT .................. OK'],['ok',' [DRIVER] STEREO OPTICS ................... OK'],['ok',' [DRIVER] 3D MESH RENDERER ................ OK'],['ok',' [DRIVER] MOTION SENSOR ................... OK'],['dim',''],['hi',' CHECKING LABOR STATUS ...'],['ok',' UNIT-1  AV-98 INGRAM ................ STANDBY'],['warn',' UNIT-2  AV-98 INGRAM .............. DAMAGED'],['ok',' HANNIBAL  TYPE-J9 BROCKEN ........... STANDBY'],['dim',''],['hi',' ALL SYSTEMS GO'],['ok',' LAUNCHING STL/PDB VISUALIZATION UNIT ...']];
   const PHASES=['BIOS / MEMORY CHECK','PERIPHERAL INIT','KERNEL LOAD','DRIVER SETUP','LABOR STATUS CHECK','LAUNCH'];
   const SEQ=[[0,0,2],[120,1,4],[220,2,5],[320,3,10,0],[440,4,14],[560,5,18],[680,6,22],[800,7,27,1],[920,8,31],[1040,9,35,undefined,'HELMETCAM: SEARCHING...'],[1160,10,38],[1280,11,42,2],[1400,12,48],[1520,13,54,3],[1640,14,59],[1760,15,64],[1880,16,69],[1980,17,72],[2080,18,76,4],[2200,19,82,undefined,'HELMETCAM: OFFLINE'],[2320,20,87],[2420,21,90],[2540,22,93],[2660,23,97,5],[2820,24,100]];
   const addLine=(type,text)=>{ const el=document.createElement('div'); el.className='bl '+type; el.textContent=text; log.appendChild(el); while(log.children.length>14) log.children[0].remove(); requestAnimationFrame(()=>el.classList.add('s')); };
